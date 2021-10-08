@@ -57,6 +57,7 @@ import org.keycloak.storage.ldap.mappers.LDAPStorageMapper;
 import org.keycloak.storage.ldap.mappers.UserAttributeLDAPStorageMapper;
 import org.keycloak.storage.ldap.mappers.UserAttributeLDAPStorageMapperFactory;
 import org.keycloak.storage.ldap.mappers.msad.MSADUserAccountControlStorageMapperFactory;
+import org.keycloak.storage.ldap.mappers.rhds.RHDSUserAccountControlStorageMapperFactory;
 import org.keycloak.storage.user.ImportSynchronization;
 import org.keycloak.storage.user.SynchronizationResult;
 import org.keycloak.utils.CredentialHelper;
@@ -424,6 +425,19 @@ public class LDAPStorageProviderFactory implements UserStorageProviderFactory<LD
                 UserAttributeLDAPStorageMapper.ALWAYS_READ_VALUE_FROM_LDAP, alwaysReadValueFromLDAP,
                 UserAttributeLDAPStorageMapper.IS_MANDATORY_IN_LDAP, "false");
         realm.addComponentModel(mapperModel);
+
+        // RHDS specific mappers for account state propagation
+        if(LDAPConstants.VENDOR_RHDS.equals(ldapConfig.getVendor())){
+            mapperModel = KeycloakModelUtils.createComponentModel("RHDS account controls", model.getId(), RHDSUserAccountControlStorageMapperFactory.PROVIDER_ID,LDAPStorageMapper.class.getName());
+            realm.addComponentModel(mapperModel);
+            mapperModel = KeycloakModelUtils.createComponentModel("account unlock time", model.getId(), UserAttributeLDAPStorageMapperFactory.PROVIDER_ID, LDAPStorageMapper.class.getName(),
+                    UserAttributeLDAPStorageMapper.USER_MODEL_ATTRIBUTE, LDAPConstants.RHDS_ACCOUNT_UNLOCK_TIME,
+                    UserAttributeLDAPStorageMapper.LDAP_ATTRIBUTE, LDAPConstants.RHDS_ACCOUNT_UNLOCK_TIME,
+                    UserAttributeLDAPStorageMapper.READ_ONLY, readOnly,
+                    UserAttributeLDAPStorageMapper.ALWAYS_READ_VALUE_FROM_LDAP, alwaysReadValueFromLDAP,
+                    UserAttributeLDAPStorageMapper.IS_MANDATORY_IN_LDAP, "false");
+            realm.addComponentModel(mapperModel);
+        }
 
         // MSAD specific mapper for account state propagation
         if (activeDirectory) {
