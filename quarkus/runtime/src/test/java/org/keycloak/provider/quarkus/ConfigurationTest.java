@@ -18,7 +18,7 @@
 package org.keycloak.provider.quarkus;
 
 import static org.junit.Assert.assertEquals;
-import static org.keycloak.util.Environment.CLI_ARGS;
+import static org.keycloak.quarkus.runtime.Environment.CLI_ARGS;
 
 import java.io.File;
 import java.lang.reflect.Field;
@@ -36,11 +36,12 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
 import org.keycloak.Config;
-import org.keycloak.configuration.KeycloakConfigSourceProvider;
-import org.keycloak.configuration.MicroProfileConfigProvider;
+import org.keycloak.quarkus.runtime.configuration.KeycloakConfigSourceProvider;
+import org.keycloak.quarkus.runtime.configuration.MicroProfileConfigProvider;
 
 import io.quarkus.runtime.configuration.ConfigUtils;
 import io.smallrye.config.SmallRyeConfigProviderResolver;
+import org.keycloak.quarkus.runtime.Environment;
 
 public class ConfigurationTest {
 
@@ -142,7 +143,7 @@ public class ConfigurationTest {
 
     @Test
     public void testKeycloakProfilePropertySubstitution() {
-        System.setProperty("kc.profile", "user-profile");
+        System.setProperty(Environment.PROFILE, "user-profile");
         assertEquals("http://filepropprofile.unittest", initConfig("hostname", "default").get("frontendUrl"));
     }
 
@@ -257,11 +258,11 @@ public class ConfigurationTest {
         Assert.assertEquals("cluster-default.xml", initConfig("connectionsInfinispan", "quarkus").get("configFile"));
 
         // If explicitly set, then it is always used regardless of the profile
-        System.clearProperty("kc.profile");
+        System.clearProperty(Environment.PROFILE);
         System.setProperty(CLI_ARGS, "--cluster=foo");
 
         Assert.assertEquals("cluster-foo.xml", initConfig("connectionsInfinispan", "quarkus").get("configFile"));
-        System.setProperty("kc.profile", "dev");
+        System.setProperty(Environment.PROFILE, "dev");
         Assert.assertEquals("cluster-foo.xml", initConfig("connectionsInfinispan", "quarkus").get("configFile"));
 
         System.setProperty(CLI_ARGS, "--cluster-stack=foo");
