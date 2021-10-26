@@ -663,7 +663,12 @@ public class LDAPStorageProvider implements UserStorageProvider,
                     operationDecorator = updater.beforePasswordUpdate(user, ldapUser, (UserCredentialModel)input);
                 }
 
-                ldapIdentityStore.updatePassword(ldapUser, password, operationDecorator);
+                String oldPassword = ((UserCredentialModel)input).getOldValue();
+                if(oldPassword == null || oldPassword.equals("")){
+                    ldapIdentityStore.updatePassword(ldapUser, password, operationDecorator);
+                }else {
+                    ldapIdentityStore.updatePasswordAsUser(ldapUser, oldPassword, password, operationDecorator);
+                }
 
                 if (updater != null) updater.passwordUpdated(user, ldapUser, (UserCredentialModel)input);
                 return true;

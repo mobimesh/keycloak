@@ -6,7 +6,24 @@
         <form id="kc-passwd-update-form" class="${properties.kcFormClass!}" action="${url.loginAction}" method="post">
             <input type="text" id="username" name="username" value="${username}" autocomplete="username"
                    readonly="readonly" style="display:none;"/>
-            <input type="password" id="password" name="password" autocomplete="current-password" style="display:none;"/>
+
+            <div class="${properties.kcFormGroupClass!}">
+                <div class="${properties.kcLabelWrapperClass!}">
+                    <label for="password" class="${properties.kcLabelClass!}">${msg("password")}</label>
+                </div>
+                <div class="${properties.kcInputWrapperClass!}">
+                    <input type="password" id="password" name="password" class="${properties.kcInputClass!}"
+                           autofocus autocomplete="password"
+                           aria-invalid="<#if messagesPerField.existsError('password','password-confirm')>true</#if>"
+                    />
+
+                    <#if messagesPerField.existsError('password')>
+                        <span id="input-error-password" class="${properties.kcInputErrorMessageClass!}" aria-live="polite">
+                            ${kcSanitize(messagesPerField.get('password'))?no_esc}
+                        </span>
+                    </#if>
+                </div>
+            </div>
 
             <div class="${properties.kcFormGroupClass!}">
                 <div class="${properties.kcLabelWrapperClass!}">

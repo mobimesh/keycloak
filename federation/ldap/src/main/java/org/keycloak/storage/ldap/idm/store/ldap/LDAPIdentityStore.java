@@ -384,6 +384,34 @@ public class LDAPIdentityStore implements IdentityStore {
         }
     }
 
+    public void updatePasswordAsUser(LDAPObject user, String oldPassword, String newPassword, LDAPOperationDecorator passwordUpdateDecorator) {
+        String userDN = user.getDn().toString();
+
+        if (logger.isDebugEnabled()) {
+            logger.debugf("Using DN [%s] for updating LDAP password of user", userDN);
+        }
+
+        if (getConfig().isActiveDirectory()) {
+            updateADPassword(userDN, newPassword, passwordUpdateDecorator);
+            return;
+        }
+
+        try {
+            if (config.useExtendedPasswordModifyOp()) {
+                operationManager.passwordModifyExtended(userDN, newPassword, passwordUpdateDecorator);
+            } else {
+                ModificationItem[] mods = new ModificationItem[1];
+                BasicAttribute mod0 = new BasicAttribute(LDAPConstants.USER_PASSWORD_ATTRIBUTE, newPassword);
+                mods[0] = new ModificationItem(DirContext.REPLACE_ATTRIBUTE, mod0);
+                operationManager.modifyAttributesAsUser(userDN, oldPassword, mods, passwordUpdateDecorator);
+            }
+        } catch (ModelException me) {
+            throw me;
+        } catch (Exception e) {
+            throw new ModelException("Error updating password.", e);
+        }
+    }
+
     private void updateADPassword(String userDN, String password, LDAPOperationDecorator passwordUpdateDecorator) {
         try {
             // Replace the "unicdodePwd" attribute with a new value

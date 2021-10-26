@@ -52,6 +52,7 @@ public class UserCredentialModel implements CredentialInput {
     public static final String KERBEROS = CredentialModel.KERBEROS;
     public static final String CLIENT_CERT = CredentialModel.CLIENT_CERT;
 
+    private String oldPassword;
     private String credentialId;
     private String type;
     private String challengeResponse;
@@ -86,6 +87,17 @@ public class UserCredentialModel implements CredentialInput {
     public static PasswordUserCredentialModel password(String password, boolean adminRequest) {
         // It uses PasswordUserCredentialModel for backwards compatibility. Some UserStorage providers can check for that type
         return new PasswordUserCredentialModel("", PasswordCredentialModel.TYPE, password, adminRequest);
+    }
+
+    public static PasswordUserCredentialModel password(String oldPassword, String password) {
+        return password(oldPassword, password, false);
+    }
+
+    public static PasswordUserCredentialModel password(String oldPassword, String password, boolean adminRequest) {
+        // It uses PasswordUserCredentialModel for backwards compatibility. Some UserStorage providers can check for that type
+        PasswordUserCredentialModel pucm = new PasswordUserCredentialModel("", PasswordCredentialModel.TYPE, password, adminRequest);
+        pucm.setOldValue(oldPassword);
+        return pucm;
     }
 
     @Deprecated /** passwordToken is legacy stuff. Not used in Keycloak anymore **/
@@ -166,6 +178,14 @@ public class UserCredentialModel implements CredentialInput {
 
     public void setValue(String value) {
         this.challengeResponse = value;
+    }
+
+    public String getOldValue() {
+        return oldPassword;
+    }
+
+    public void setOldValue(String value) {
+        this.oldPassword = value;
     }
 
     public String getDevice() {

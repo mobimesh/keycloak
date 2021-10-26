@@ -103,6 +103,7 @@ public class UpdatePassword implements RequiredActionProvider, RequiredActionFac
         KeycloakSession session = context.getSession();
         MultivaluedMap<String, String> formData = context.getHttpRequest().getDecodedFormParameters();
         event.event(EventType.UPDATE_PASSWORD);
+        String passwordOld = formData.getFirst("password");
         String passwordNew = formData.getFirst("password-new");
         String passwordConfirm = formData.getFirst("password-confirm");
 
@@ -139,7 +140,7 @@ public class UpdatePassword implements RequiredActionProvider, RequiredActionFac
         }
 
         try {
-            session.userCredentialManager().updateCredential(realm, user, UserCredentialModel.password(passwordNew, false));
+            session.userCredentialManager().updateCredential(realm, user, UserCredentialModel.password(passwordOld, passwordNew, false));
             context.success();
         } catch (ModelException me) {
             errorEvent.detail(Details.REASON, me.getMessage()).error(Errors.PASSWORD_REJECTED);

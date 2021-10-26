@@ -51,12 +51,7 @@ import javax.naming.ldap.StartTlsResponse;
 import javax.net.ssl.SSLSocketFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Hashtable;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
 
 /**
  * <p>This class provides a set of operations to manage LDAP trees.</p>
@@ -594,6 +589,52 @@ public class LDAPOperationManager {
         }
     }
 
+    public void modifyAttributesNamingAsUser(final String dn, String password, final ModificationItem[] mods, LDAPOperationDecorator decorator) throws NamingException {
+        if (logger.isTraceEnabled()) {
+            logger.tracef("Modifying attributes for entry [%s]: [", dn);
+
+            for (ModificationItem item : mods) {
+                Object values;
+
+                if (item.getAttribute().size() > 0) {
+                    values = item.getAttribute().get();
+                } else {
+                    values = "No values";
+                }
+
+                String attrName = item.getAttribute().getID().toUpperCase();
+                if (attrName.contains("PASSWORD") || attrName.contains("UNICODEPWD")) {
+                    values = "********************";
+                }
+
+                logger.tracef("  Op [%s]: %s = %s", item.getModificationOp(), item.getAttribute().getID(), values);
+            }
+
+            logger.tracef("]");
+        }
+
+        try {
+
+            executeForUser(dn, password, new LdapOperation<Void>() {
+                @Override
+                public Void execute(LdapContext context) throws NamingException {
+                    context.modifyAttributes(dn, mods);
+                    return null;
+                }
+            }, decorator);
+        } catch (NamingException e) {
+            throw new ModelException("Could not modify attribute for DN [" + dn + "]", e);
+        }
+    }
+
+    public void modifyAttributesAsUser(final String dn, String password, final ModificationItem[] mods, LDAPOperationDecorator decorator) {
+        try {
+            modifyAttributesNamingAsUser(dn, password, mods, decorator);
+        } catch (NamingException e) {
+            throw new ModelException("Could not modify attribute for DN [" + dn + "]", e);
+        }
+    }
+
     public void createSubContext(final String name, final Attributes attributes) {
         try {
             if (logger.isTraceEnabled()) {
@@ -724,6 +765,28 @@ public class LDAPOperationManager {
                 }
             }
         }
+    }
+
+    private <R> R executeForUser(String userDn, String userPassword, LdapOperation<R> operation) throws NamingException {
+        return executeForUser(userDn, userPassword, operation, null);
+    }
+
+    private <R> R executeForUser(String userDn, String userPassword, LdapOperation<R> operation, LDAPOperationDecorator decorator) throws NamingException {
+        Hashtable<Object, Object> env = LDAPContextManager.getNonAuthConnectionProperties(config);
+
+
+        env.put("com.sun.jndi.ldap.connect.pool", "false");
+
+        env.put(Context.SECURITY_AUTHENTICATION, "simple");
+        env.put(Context.SECURITY_PRINCIPAL, userDn);
+        env.put(Context.SECURITY_CREDENTIALS, userPassword);
+
+        LdapContext authCtx = new InitialLdapContext(env, null);
+        R r = execute(operation, authCtx, decorator);
+        if(authCtx != null) {
+            authCtx.close();
+        }
+        return r;
     }
 
     public interface LdapOperation<R> {

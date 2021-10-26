@@ -576,6 +576,7 @@ public class AccountFormService extends AbstractSecuredLocalService {
         String password = formData.getFirst("password");
         String passwordNew = formData.getFirst("password-new");
         String passwordConfirm = formData.getFirst("password-confirm");
+        logger.warn(password + "service");
 
         EventBuilder errorEvent = event.clone().event(EventType.UPDATE_PASSWORD_ERROR)
                 .client(auth.getClient())
@@ -609,7 +610,8 @@ public class AccountFormService extends AbstractSecuredLocalService {
         }
 
         try {
-            session.userCredentialManager().updateCredential(realm, user, UserCredentialModel.password(passwordNew, false));
+            logger.warn(password + "password");
+            session.userCredentialManager().updateCredential(realm, user, UserCredentialModel.password(password, passwordNew, false));
         } catch (ReadOnlyException mre) {
             setReferrerOnPage();
             errorEvent.error(Errors.NOT_ALLOWED);

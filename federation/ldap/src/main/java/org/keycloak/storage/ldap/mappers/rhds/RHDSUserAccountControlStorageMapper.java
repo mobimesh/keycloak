@@ -67,7 +67,21 @@ public class RHDSUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
 
     @Override
     public void passwordUpdateFailed(UserModel user, LDAPObject ldapUser, UserCredentialModel password, ModelException exception) {
-        throw exception;
+        String exceptionMessage = exception.getCause().getMessage();
+        if(exceptionMessage == null){
+            throw exception;
+        }
+        Matcher m = AUTH_EXCEPTION_REGEX.matcher(exceptionMessage);
+        if (m.matches()) {
+            String errorCode = m.group(1);
+            String cause = m.group(2);
+            ModelException ex = processAuthErrorCode(errorCode, cause, user);
+            if(ex != null){
+                throw ex;
+            }
+        } else {
+            throw exception;
+        }
     }
 
     @Override
@@ -92,13 +106,13 @@ public class RHDSUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
         if (m.matches()) {
             String errorCode = m.group(1);
             String cause = m.group(2);
-            return processAuthErrorCode(errorCode, cause, user);
+            return processAuthErrorCode(errorCode, cause, user) == null;
         } else {
             return false;
         }
     }
 
-    protected boolean processAuthErrorCode(String errorCode, String cause, UserModel user) {
+    protected ModelException processAuthErrorCode(String errorCode, String cause, UserModel user) {
         logger.debugf("RHDS Error code is '%s' after failed LDAP login of user '%s'. Realm is '%s'", errorCode, user.getUsername(), getRealmName());
 
         if (ldapProvider.getEditMode() == UserStorageProvider.EditMode.WRITABLE) {
@@ -116,10 +130,16 @@ public class RHDSUserAccountControlStorageMapper extends AbstractLDAPStorageMapp
                         user.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
                     }
                 }
-                return true;
+                return null;
+            } else if ("19".equals(errorCode) && "password in history".equals(cause)){
+                return new ModelException(cause);
+            } else if("49".equals(errorCode) && "Invalid Credentials".equals(cause)){
+                return new ModelException("Invalid Credentials, could not update");
+            } else if("19".equals(errorCode) && cause.contains("invalid password syntax")){
+                return new ModelException(cause);
             }
         }
-        return false;
+        return new ModelException(cause + "(code: " + errorCode + ")");
     }
 
     private String getRealmName() {
