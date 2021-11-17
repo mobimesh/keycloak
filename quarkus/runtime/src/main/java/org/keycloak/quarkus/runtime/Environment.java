@@ -17,21 +17,19 @@
 
 package org.keycloak.quarkus.runtime;
 
+import static org.keycloak.quarkus.runtime.configuration.Configuration.getBuiltTimeProperty;
+
 import java.io.File;
 import java.io.FilenameFilter;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import io.quarkus.runtime.LaunchMode;
 import io.quarkus.runtime.configuration.ProfileManager;
 import org.apache.commons.lang3.SystemUtils;
-import org.keycloak.quarkus.runtime.configuration.Configuration;
 
 public final class Environment {
 
@@ -39,6 +37,10 @@ public final class Environment {
     public static final String CLI_ARGS = "kc.config.args";
     public static final String PROFILE ="kc.profile";
     public static final String ENV_PROFILE ="KC_PROFILE";
+    public static final String DATA_PATH = "/data";
+    public static final String DEFAULT_THEMES_PATH = "/themes";
+    public static final String DEV_PROFILE_VALUE = "dev";
+    public static final String USER_INVOKED_CLI_COMMAND = "picocli.invoked.command";
 
     private Environment() {}
 
@@ -58,6 +60,14 @@ public final class Environment {
         }
 
         return null;
+    }
+
+    public static String getDataDir() {
+        return getHomeDir() + DATA_PATH;
+    }
+
+    public static String getDefaultThemeRootDir() {
+        return getHomeDir() + DEFAULT_THEMES_PATH;
     }
 
     public static Path getProvidersPath() {
@@ -82,7 +92,30 @@ public final class Environment {
         }
         return "./kc.sh";
     }
-    
+
+    /**
+     * Sets the originally invoked cli args. Useful to verify the originally invoked command
+     * when calling another cli command internally (e.g. start-dev calls build internally)
+     */
+    public static void setUserInvokedCliArgs(List<String> cliArgs) {
+        System.setProperty(USER_INVOKED_CLI_COMMAND, String.join(",", cliArgs));
+    }
+
+    /**
+     * Reads the previously set system property for the originally command.
+     * Use the System variable, when you trigger other command executions internally, but need a reference to the
+     * actually invoked command.
+     *
+     * @return the invoked command from the CLI, or empty List if not set.
+     */
+    public static List<String> getUserInvokedCliArgs() {
+        if(System.getProperty(USER_INVOKED_CLI_COMMAND) == null) {
+            return Collections.emptyList();
+        }
+
+        return List.of(System.getProperty(USER_INVOKED_CLI_COMMAND).split(","));
+    }
+
     public static String getConfigArgs() {
         return System.getProperty(CLI_ARGS, "");
     }
@@ -112,23 +145,21 @@ public final class Environment {
         return profile;
     }
 
-    public static Optional<String> getBuiltTimeProperty(String name) {
-        String value = Configuration.getBuiltTimeProperty(name);
-
-        if (value == null) {
-            return Optional.empty();
-        }
-        
-        return Optional.of(value);
-    }
-
     public static boolean isDevMode() {
-        if ("dev".equalsIgnoreCase(getProfile())) {
+        if (DEV_PROFILE_VALUE.equalsIgnoreCase(getProfile())) {
             return true;
         }
 
         // if running in quarkus:dev mode
-        return ProfileManager.getLaunchMode() == LaunchMode.DEVELOPMENT;
+        if (ProfileManager.getLaunchMode() == LaunchMode.DEVELOPMENT) {
+            return true;
+        }
+
+        return DEV_PROFILE_VALUE.equals(getBuiltTimeProperty(PROFILE).orElse(null));
+    }
+
+    public static boolean isDevProfile(){
+        return Optional.ofNullable(getProfile()).orElse("").equalsIgnoreCase(DEV_PROFILE_VALUE);
     }
 
     public static boolean isImportExportMode() {
@@ -140,8 +171,7 @@ public final class Environment {
     }
 
     public static void forceDevProfile() {
-        System.setProperty(PROFILE, "dev");
-        System.setProperty("quarkus.profile", "dev");
+        setProfile(DEV_PROFILE_VALUE);
     }
 
     public static Map<String, File> getProviderFiles() {
