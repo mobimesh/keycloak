@@ -234,7 +234,8 @@ public class ConfigurationTest {
         System.setProperty(CLI_ARGS, "--db=h2-file");
         SmallRyeConfig config = createConfig();
         assertEquals(QuarkusH2Dialect.class.getName(), config.getConfigValue("quarkus.hibernate-orm.dialect").getValue());
-        assertEquals("jdbc:h2:file:~/data/h2/keycloakdb;;AUTO_SERVER=TRUE", config.getConfigValue("quarkus.datasource.jdbc.url").getValue());
+        assertTrue(config.getConfigValue("quarkus.datasource.jdbc.url").getValue().matches("jdbc:h2:file:~[/\\\\]data[/\\\\]h2[/\\\\]keycloakdb;;AUTO_SERVER=TRUE"));
+        //assertEquals("jdbc:h2:file:~/data/h2/keycloakdb;;AUTO_SERVER=TRUE", config.getConfigValue("quarkus.datasource.jdbc.url").getValue());
 
         System.setProperty(CLI_ARGS, "--db=h2-mem");
         config = createConfig();

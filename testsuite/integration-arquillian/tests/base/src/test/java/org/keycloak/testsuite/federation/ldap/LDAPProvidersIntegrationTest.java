@@ -905,7 +905,7 @@ public class LDAPProvidersIntegrationTest extends AbstractLDAPTest {
             // LDAP password is still unchanged
             try {
                 LDAPObject ldapUser = ctx.getLdapProvider().loadLDAPUserByUsername(appRealm, "johnkeycloak");
-                ctx.getLdapProvider().getLdapIdentityStore().validatePassword(ldapUser, "Password1");
+                ctx.getLdapProvider().getLdapIdentityStore().validatePassword(ldapUser, "Password1", null);
             } catch (AuthenticationException ex) {
                 throw new RuntimeException(ex);
             }

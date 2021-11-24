@@ -624,7 +624,7 @@ public class LDAPStorageProvider implements UserStorageProvider,
             LDAPObject ldapUser = loadAndValidateUser(realm, user);
 
             try {
-                ldapIdentityStore.validatePassword(ldapUser, password);
+                ldapIdentityStore.validatePassword(ldapUser, password, user);
                 return true;
             } catch (AuthenticationException ae) {
                 AtomicReference<Boolean> processed = new AtomicReference<>(false);

@@ -22,6 +22,8 @@ import org.keycloak.common.util.Base64;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.LDAPConstants;
 import org.keycloak.models.ModelException;
+import org.keycloak.models.UserModel;
+import org.keycloak.sessions.AuthenticationSessionModel;
 import org.keycloak.storage.ldap.LDAPConfig;
 import org.keycloak.representations.idm.LDAPCapabilityRepresentation.CapabilityType;
 import org.keycloak.storage.ldap.idm.model.LDAPDn;
@@ -47,16 +49,7 @@ import javax.naming.directory.SearchControls;
 import javax.naming.directory.SearchResult;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -345,7 +338,7 @@ public class LDAPIdentityStore implements IdentityStore {
     // *************** CREDENTIALS AND USER SPECIFIC STUFF
 
     @Override
-    public void validatePassword(LDAPObject user, String password) throws AuthenticationException {
+    public void validatePassword(LDAPObject user, String password, UserModel kcUser) throws AuthenticationException {
         String userDN = user.getDn().toString();
 
         if (logger.isTraceEnabled()) {
@@ -353,6 +346,15 @@ public class LDAPIdentityStore implements IdentityStore {
         }
 
         operationManager.authenticate(userDN, password);
+        String passwordExpWarned = user.getAttributeAsString("passwordExpWarned");
+        if(passwordExpWarned != null && kcUser != null){
+            int warningsSent = Integer.parseInt(passwordExpWarned);
+            if(warningsSent > 0){
+                if (kcUser.getRequiredActionsStream().noneMatch(action -> Objects.equals(action, UserModel.RequiredAction.UPDATE_PASSWORD.name()))) {
+                    kcUser.addRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
+                }
+            }
+        }
     }
 
     @Override
