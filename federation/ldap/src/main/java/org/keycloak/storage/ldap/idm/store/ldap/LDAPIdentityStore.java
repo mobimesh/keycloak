@@ -346,7 +346,15 @@ public class LDAPIdentityStore implements IdentityStore {
         }
 
         operationManager.authenticate(userDN, password);
-        String passwordExpWarned = user.getAttributeAsString("passwordExpWarned");
+        Set<String> set = new HashSet<>();
+        set.add("passwordExpWarned");
+        Attributes atts = operationManager.getAttributes(user.getUuid(), user.getDn().toString(), set);
+        String passwordExpWarned = null;
+        try {
+            passwordExpWarned = (String)atts.get("passwordExpWarned").get(0);
+        } catch (Exception ignored){
+
+        }
         if(passwordExpWarned != null && kcUser != null){
             int warningsSent = Integer.parseInt(passwordExpWarned);
             if(warningsSent > 0){
