@@ -348,10 +348,10 @@ public class LDAPIdentityStore implements IdentityStore {
         operationManager.authenticate(userDN, password);
         Set<String> set = new HashSet<>();
         set.add("passwordExpWarned");
-        Attributes atts = operationManager.getAttributes(user.getUuid(), user.getDn().toString(), set);
+        Attributes userAttributes = operationManager.getAttributes(user.getUuid(), user.getDn().getParentDn().toString(), set);
         String passwordExpWarned = null;
         try {
-            passwordExpWarned = (String)atts.get("passwordExpWarned").get(0);
+            passwordExpWarned = (String)userAttributes.get("passwordExpWarned").get(0);
         } catch (Exception ignored){
 
         }
