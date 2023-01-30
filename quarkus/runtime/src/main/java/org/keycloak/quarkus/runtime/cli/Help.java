@@ -17,24 +17,71 @@
 
 package org.keycloak.quarkus.runtime.cli;
 
+import static org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers.getMapper;
 import static picocli.CommandLine.Help.Column.Overflow.SPAN;
 import static picocli.CommandLine.Help.Column.Overflow.WRAP;
 
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Iterator;
+import java.util.List;
+import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMapper;
+import org.keycloak.quarkus.runtime.configuration.mappers.PropertyMappers;
 import org.keycloak.utils.StringUtil;
 
 import picocli.CommandLine;
+import picocli.CommandLine.Model.ArgGroupSpec;
+import picocli.CommandLine.Model.OptionSpec;
 
-public class Help extends CommandLine.Help {
+public final class Help extends CommandLine.Help {
 
+    static final String[] OPTION_NAMES = new String[] { "-h", "--help" };
     private static final int HELP_WIDTH = 100;
+    private static final String DEFAULT_OPTION_LIST_HEADING = "Options:";
+    private static final String DEFAULT_COMMAND_LIST_HEADING = "Commands:";
+    private boolean allOptions;
 
-    public Help(CommandLine.Model.CommandSpec commandSpec, ColorScheme colorScheme) {
+    Help(CommandLine.Model.CommandSpec commandSpec, ColorScheme colorScheme) {
         super(commandSpec, colorScheme);
+        configureUsageMessage(commandSpec);
+    }
+
+    @Override
+    public String optionList(Layout layout, Comparator<OptionSpec> optionSort, IParamLabelRenderer valueLabelRenderer) {
+        List<OptionSpec> visibleOptionsNotInGroups = excludeHiddenAndGroupOptions(commandSpec().options());
+        return optionListExcludingGroups(visibleOptionsNotInGroups, layout, optionSort, valueLabelRenderer) + optionListGroupSections();
+    }
+
+    private List<OptionSpec> excludeHiddenAndGroupOptions(List<OptionSpec> all) {
+        List<OptionSpec> result = new ArrayList<>(all);
+
+        for (ArgGroupSpec group : optionSectionGroups()) {
+            result.removeAll(group.allOptionsNested());
+        }
+
+        for (Iterator<OptionSpec> iter = result.iterator(); iter.hasNext(); ) {
+            OptionSpec optionSpec = iter.next();
+
+            if (!isVisible(optionSpec)) {
+                iter.remove();
+            }
+        }
+
+        return result;
     }
 
     @Override
     public Layout createDefaultLayout() {
-        return new Layout(colorScheme(), createTextTable(), createDefaultOptionRenderer(), createDefaultParameterRenderer());
+        return new Layout(colorScheme(), createTextTable(), createDefaultOptionRenderer(), createDefaultParameterRenderer()) {
+            @Override
+            public void addOptions(List<OptionSpec> options, IParamLabelRenderer paramLabelRenderer) {
+                for (OptionSpec optionSpec : options) {
+                    if (isVisible(optionSpec)) {
+                        addOption(optionSpec, paramLabelRenderer);
+                    }
+                }
+            }
+        };
     }
 
     private TextTable createTextTable() {
@@ -76,5 +123,59 @@ public class Help extends CommandLine.Help {
                 return new Ansi.Text[0][];
             }
         };
+    }
+
+    @Override
+    public List<ArgGroupSpec> optionSectionGroups() {
+        List<ArgGroupSpec> allGroupSpecs = super.optionSectionGroups();
+        List<ArgGroupSpec> nonEmptyGroups = new ArrayList<>(allGroupSpecs);
+        Iterator<ArgGroupSpec> argGroupSpecsIt = nonEmptyGroups.iterator();
+
+        while (argGroupSpecsIt.hasNext()) {
+            ArgGroupSpec argGroupSpec = argGroupSpecsIt.next();
+
+            if (argGroupSpec.options().stream().anyMatch(this::isVisible)) {
+                continue;
+            }
+
+            // remove groups with no options in it
+            argGroupSpecsIt.remove();
+        }
+
+        return nonEmptyGroups;
+    }
+
+    private void configureUsageMessage(CommandLine.Model.CommandSpec commandSpec) {
+        commandSpec.usageMessage()
+                .abbreviateSynopsis(true)
+                .optionListHeading(DEFAULT_OPTION_LIST_HEADING)
+                .commandListHeading(DEFAULT_COMMAND_LIST_HEADING);
+    }
+
+    private boolean isVisible(OptionSpec option) {
+        if (option.description().length == 0) {
+            // do not show options without a description
+            return false;
+        }
+
+        PropertyMapper<?> mapper = getMapper(option.longestName());
+
+        if (mapper == null) {
+            // only filter mapped options, defaults to the hidden marker
+            return !option.hidden();
+        }
+
+        boolean isUnsupportedOption = !PropertyMappers.isSupported(mapper);
+
+        if (isUnsupportedOption) {
+            // unsupported options removed from help if all options are not requested
+            return !option.hidden() && allOptions;
+        }
+
+        return !option.hidden();
+    }
+
+    public void setAllOptions(boolean allOptions) {
+        this.allOptions = allOptions;
     }
 }

@@ -34,7 +34,10 @@ import javax.ws.rs.core.UriInfo;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
+
+import static org.keycloak.utils.LockObjectsForModification.lockUserSessionsForModification;
 
 /**
  * @author <a href="mailto:mposolda@redhat.com">Marek Posolda</a>
@@ -98,7 +101,7 @@ public class AuthenticationSessionManager {
             AuthSessionId authSessionId = decodeAuthSessionId(oldEncodedId);
             String sessionId = authSessionId.getDecodedId();
 
-            UserSessionModel userSession = session.sessions().getUserSession(realm, sessionId);
+            UserSessionModel userSession = lockUserSessionsForModification(session, () -> session.sessions().getUserSession(realm, sessionId));
 
             if (userSession != null) {
                 reencodeAuthSessionCookie(oldEncodedId, authSessionId, realm);
@@ -194,7 +197,18 @@ public class AuthenticationSessionManager {
             log.debugf("Not found AUTH_SESSION_ID cookie");
         }
 
-        return authSessionIds;
+        return authSessionIds.stream().filter(new Predicate<String>() {
+            @Override
+            public boolean test(String id) {
+                StickySessionEncoderProvider encoder = session.getProvider(StickySessionEncoderProvider.class);
+                // in case the id is encoded with a route when running in a cluster
+                String decodedId = encoder.decodeSessionId(id);
+                // we can't blindly trust the cookie and assume it is valid and referencing a valid root auth session
+                // but make sure the root authentication session actually exists
+                // without this check there is a risk of resolving user sessions from invalid root authentication sessions as they share the same id
+                return session.authenticationSessions().getRootAuthenticationSession(realm, decodedId) != null;
+            }
+        }).collect(Collectors.toList());
     }
 
 
@@ -215,7 +229,7 @@ public class AuthenticationSessionManager {
 
     // Check to see if we already have authenticationSession with same ID
     public UserSessionModel getUserSession(AuthenticationSessionModel authSession) {
-        return session.sessions().getUserSession(authSession.getRealm(), authSession.getParentSession().getId());
+        return lockUserSessionsForModification(session, () -> session.sessions().getUserSession(authSession.getRealm(), authSession.getParentSession().getId()));
     }
 
 

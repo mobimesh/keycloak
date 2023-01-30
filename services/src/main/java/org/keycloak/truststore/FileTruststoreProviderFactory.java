@@ -19,8 +19,11 @@ package org.keycloak.truststore;
 
 import org.jboss.logging.Logger;
 import org.keycloak.Config;
+import org.keycloak.common.util.KeystoreUtil;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
+import org.keycloak.provider.ProviderConfigProperty;
+import org.keycloak.provider.ProviderConfigurationBuilder;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -36,10 +39,13 @@ import java.security.SignatureException;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+
 import javax.security.auth.x500.X500Principal;
 
 /**
@@ -62,6 +68,7 @@ public class FileTruststoreProviderFactory implements TruststoreProviderFactory 
         String storepath = config.get("file");
         String pass = config.get("password");
         String policy = config.get("hostname-verification-policy");
+        String configuredType = config.get("type");
 
         // if "truststore" . "file" is not configured then it is disabled
         if (storepath == null && pass == null && policy == null) {
@@ -78,10 +85,11 @@ public class FileTruststoreProviderFactory implements TruststoreProviderFactory 
             throw new RuntimeException("Attribute 'password' missing in 'truststore':'file' configuration");
         }
 
+        String type = KeystoreUtil.getKeystoreType(configuredType, storepath, KeyStore.getDefaultType());
         try {
-            truststore = loadStore(storepath, pass == null ? null :pass.toCharArray());
+            truststore = loadStore(storepath, type, pass == null ? null :pass.toCharArray());
         } catch (Exception e) {
-            throw new RuntimeException("Failed to initialize TruststoreProviderFactory: " + new File(storepath).getAbsolutePath(), e);
+            throw new RuntimeException("Failed to initialize TruststoreProviderFactory: " + new File(storepath).getAbsolutePath() + ", truststore type: " + type, e);
         }
         if (policy == null) {
             verificationPolicy = HostnameVerificationPolicy.WILDCARD;
@@ -97,11 +105,11 @@ public class FileTruststoreProviderFactory implements TruststoreProviderFactory 
         provider = new FileTruststoreProvider(truststore, verificationPolicy, Collections.unmodifiableMap(certsLoader.trustedRootCerts)
                 , Collections.unmodifiableMap(certsLoader.intermediateCerts));
         TruststoreProviderSingleton.set(provider);
-        log.debug("File truststore provider initialized: " + new File(storepath).getAbsolutePath());
+        log.debugf("File truststore provider initialized: %s, Truststore type: %s",  new File(storepath).getAbsolutePath(), type);
     }
 
-    private KeyStore loadStore(String path, char[] password) throws Exception {
-        KeyStore ks = KeyStore.getInstance(KeyStore.getDefaultType());
+    private KeyStore loadStore(String path, String type, char[] password) throws Exception {
+        KeyStore ks = KeyStore.getInstance(type);
         InputStream is = new FileInputStream(path);
         try {
             ks.load(is, password);
@@ -127,7 +135,28 @@ public class FileTruststoreProviderFactory implements TruststoreProviderFactory 
         return "file";
     }
 
-
+    @Override
+    public List<ProviderConfigProperty> getConfigMetadata() {
+        return ProviderConfigurationBuilder.create()
+                .property()
+                .name("file")
+                .type("string")
+                .helpText("The file path of the trust store from where the certificates are going to be read from to validate TLS connections.")
+                .add()
+                .property()
+                .name("password")
+                .type("string")
+                .helpText("The trust store password.")
+                .add()
+                .property()
+                .name("hostname-verification-policy")
+                .type("string")
+                .helpText("The hostname verification policy.")
+                .options(Arrays.stream(HostnameVerificationPolicy.values()).map(HostnameVerificationPolicy::name).map(String::toLowerCase).toArray(String[]::new))
+                .defaultValue(HostnameVerificationPolicy.WILDCARD.name().toLowerCase())
+                .add()
+                .build();
+    }
 
     private static class TruststoreCertificatesLoader {
 

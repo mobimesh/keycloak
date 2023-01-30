@@ -17,75 +17,93 @@
 
 package org.keycloak.quarkus.runtime.integration.web;
 
+import java.util.concurrent.ExecutorService;
+import java.util.function.Predicate;
 import org.keycloak.common.ClientConnection;
+import org.keycloak.common.util.Resteasy;
 import org.keycloak.models.KeycloakSession;
-import org.keycloak.services.filters.AbstractRequestFilter;
+import org.keycloak.quarkus.runtime.transaction.TransactionalSessionHandler;
 
-import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.ext.web.RoutingContext;
 
 /**
  * <p>This filter is responsible for managing the request lifecycle as well as setting up the necessary context to process incoming
- * requests.
+ * requests. We need this filter running on the top of the chain in order to push contextual objects before executing Resteasy. It is not
+ * possible to use a {@link javax.ws.rs.container.ContainerRequestFilter} for this purpose because some mechanisms like error handling
+ * will not be able to access these contextual objects.
  * 
- * <p>The filter itself runs in a event loop and should delegate to worker threads any blocking code (for now, all requests are handled
+ * <p>The filter itself runs in an event loop and should delegate to worker threads any blocking code (for now, all requests are handled
  * as blocking).
+ *
+ * <p>Note that this filter is only responsible to close the {@link KeycloakSession} if not already closed when running Resteasy code. The reason is that closing it should be done at the
+ * Resteasy level so that we don't block event loop threads even if they execute in a worker thread. Vert.x handlers and their
+ * callbacks are not designed to run blocking code. If the session is eventually closed here is because Resteasy was not executed.
+ *
+ * @see org.keycloak.quarkus.runtime.integration.jaxrs.TransactionalResponseInterceptor
+ * @see org.keycloak.quarkus.runtime.integration.jaxrs.TransactionalResponseFilter
  */
-public class QuarkusRequestFilter extends AbstractRequestFilter implements Handler<RoutingContext> {
+public class QuarkusRequestFilter implements Handler<RoutingContext>, TransactionalSessionHandler {
 
-    private static final Handler<AsyncResult<Object>> EMPTY_RESULT = result -> {
-        // we don't really care about the result because any exception thrown should be handled by the parent class
-    };
+    private final ExecutorService executor;
+
+    private Predicate<RoutingContext> contextFilter;
+
+    public QuarkusRequestFilter() {
+        this(null, null);
+    }
+
+    public QuarkusRequestFilter(Predicate<RoutingContext> contextFilter, ExecutorService executor) {
+        this.contextFilter = contextFilter;
+        this.executor = executor;
+    }
 
     @Override
     public void handle(RoutingContext context) {
+        if (ignoreContext(context)) {
+            context.next();
+            return;
+        }
         // our code should always be run as blocking until we don't provide a better support for running non-blocking code
         // in the event loop
-        context.vertx().executeBlocking(promise -> {
-            ClientConnection connection = createClientConnection(context.request());
-
-            filter(connection, session -> {
-                try {
-                    configureContextualData(context, connection, session);
-
-                    // we need to close the session before response is sent to the client, otherwise subsequent requests could
-                    // not get the latest state because the session from the previous request is still being closed
-                    // other methods from Vert.x to add a handler to the response works asynchronously
-                    context.addHeadersEndHandler(createEndHandler(context, promise, session));
-                    context.next();
-                } catch (Throwable cause) {
-                    context.fail(cause);
-                    // re-throw so that the any exception is handled from parent
-                    throw new RuntimeException(cause);
-                }
-            });
-        }, false, EMPTY_RESULT);
+        executor.execute(createBlockingHandler(context));
     }
 
-    private Handler<Void> createEndHandler(RoutingContext context, io.vertx.core.Promise<Object> promise,
-            KeycloakSession session) {
-        return event -> {
+    private boolean ignoreContext(RoutingContext context) {
+        return contextFilter != null && contextFilter.test(context);
+    }
+
+    private Runnable createBlockingHandler(RoutingContext context) {
+        return () -> {
+            KeycloakSession session = configureContextualData(context);
+
             try {
-                close(session);
-                promise.complete();
+                context.next();
             } catch (Throwable cause) {
-                context.fail(cause);
+                // re-throw so that the any exception is handled from parent
+                throw new RuntimeException(cause);
+            } finally {
+                // force closing the session if not already closed
+                // under some circumstances resteasy might not be invoked like when no route is found for a particular path
+                // in this case context is set with status code 404, and we need to close the session
+                close(session);
             }
         };
     }
 
-    private void configureContextualData(RoutingContext context, ClientConnection connection, KeycloakSession session) {
-        // quarkus-resteasy changed and clears the context map before dispatching
-        // need to push keycloak contextual objects into the routing context for retrieving it later
-        context.data().put(KeycloakSession.class.getName(), session);
-        context.data().put(ClientConnection.class.getName(), connection);
-    }
+    private KeycloakSession configureContextualData(RoutingContext context) {
+        KeycloakSession session = create();
 
-    @Override
-    protected boolean isAutoClose() {
-        return false;
+        Resteasy.pushContext(KeycloakSession.class, session);
+        context.put(KeycloakSession.class.getName(), session);
+
+        ClientConnection connection = createClientConnection(context.request());
+
+        Resteasy.pushContext(ClientConnection.class, connection);
+        context.put(ClientConnection.class.getName(), connection);
+
+        return session;
     }
 
     private ClientConnection createClientConnection(HttpServerRequest request) {
