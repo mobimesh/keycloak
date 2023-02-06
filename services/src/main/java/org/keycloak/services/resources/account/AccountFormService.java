@@ -621,7 +621,7 @@ public class AccountFormService extends AbstractSecuredLocalService {
         }
 
         try {
-            user.credentialManager().updateCredential(UserCredentialModel.password(passwordNew, false));
+            user.credentialManager().updateCredential(UserCredentialModel.password(password, passwordNew, false));
         } catch (ReadOnlyException mre) {
             setReferrerOnPage();
             errorEvent.error(Errors.NOT_ALLOWED);
