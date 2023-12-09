@@ -334,7 +334,7 @@ public class LDAPIdentityStore implements IdentityStore {
     // *************** CREDENTIALS AND USER SPECIFIC STUFF
 
     @Override
-    public void validatePassword(LDAPObject user, String password) throws AuthenticationException {
+    public void validatePassword(LDAPObject user, String password, UserModel kcUser) throws AuthenticationException {
         if (logger.isTraceEnabled()) {
             logger.tracef("Using DN [%s] for authentication of user", user.getDn());
         }
@@ -342,7 +342,7 @@ public class LDAPIdentityStore implements IdentityStore {
         operationManager.authenticate(user.getDn().getLdapName(), password);
         Set<String> set = new HashSet<>();
         set.add("passwordExpWarned");
-        Attributes userAttributes = operationManager.getAttributes(user.getUuid(), user.getDn().getParentDn().toString(), set);
+        Attributes userAttributes = operationManager.getAttributes(user.getUuid(), user.getDn().getParentDn().getLdapName(), set);
         String passwordExpWarned = null;
         try {
             passwordExpWarned = (String)userAttributes.get("passwordExpWarned").get(0);
@@ -388,7 +388,7 @@ public class LDAPIdentityStore implements IdentityStore {
     }
 
     public void updatePasswordAsUser(LDAPObject user, String oldPassword, String newPassword, LDAPOperationDecorator passwordUpdateDecorator) {
-        String userDN = user.getDn().toString();
+        LdapName userDN =  user.getDn().getLdapName();
 
         if (logger.isDebugEnabled()) {
             logger.debugf("Using DN [%s] for updating LDAP password of user", userDN);

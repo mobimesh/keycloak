@@ -629,7 +629,6 @@ public class LDAPOperationManager {
         }
 
         try {
-
             executeForUser(dn, password, new LdapOperation<Void>() {
 
                 @Override
@@ -792,13 +791,8 @@ public class LDAPOperationManager {
         }
     }
 
-    private <R> R executeForUser(String userDn, String userPassword, LdapOperation<R> operation) throws NamingException {
-        return executeForUser(userDn, userPassword, operation, null);
-    }
-
-    private <R> R executeForUser(String userDn, String userPassword, LdapOperation<R> operation, LDAPOperationDecorator decorator) throws NamingException {
+    private <R> R executeForUser(LdapName userDn, String userPassword, LdapOperation<R> operation, LDAPOperationDecorator decorator) throws NamingException {
         Hashtable<Object, Object> env = LDAPContextManager.getNonAuthConnectionProperties(config);
-
 
         env.put("com.sun.jndi.ldap.connect.pool", "false");
 
@@ -807,11 +801,16 @@ public class LDAPOperationManager {
         env.put(Context.SECURITY_CREDENTIALS, userPassword);
 
         LdapContext authCtx = new InitialLdapContext(env, null);
-        R r = execute(operation, authCtx, decorator);
-        if(authCtx != null) {
+
+        try {
+            return execute(operation, authCtx, decorator);
+        } finally {
             authCtx.close();
         }
-        return r;
+    }
+
+    private <R> R executeForUser(LdapName userDn, String userPassword, LdapOperation<R> operation) throws NamingException {
+        return executeForUser(userDn, userPassword, operation, null);
     }
 
     public interface LdapOperation<R> {
