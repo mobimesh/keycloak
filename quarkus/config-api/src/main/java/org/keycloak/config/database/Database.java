@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -94,24 +95,40 @@ public final class Database {
         return Optional.of(vendor.dialect.apply(alias));
     }
 
-    public static List<String> getAliases() {
-        return DATABASES.keySet().stream().sorted().collect(Collectors.toList());
+    /**
+     * @return List of aliases of databases
+     */
+    public static List<String> getDatabaseAliases() {
+        return DATABASES.entrySet().stream()
+                .map(Entry::getKey)
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     public enum Vendor {
         H2("h2",
                 "org.h2.jdbcx.JdbcDataSource",
                 "org.h2.Driver",
-                "io.quarkus.hibernate.orm.runtime.dialect.QuarkusH2Dialect",
+                "org.hibernate.dialect.H2Dialect",
                 new Function<String, String>() {
                     @Override
                     public String apply(String alias) {
                         if ("dev-file".equalsIgnoreCase(alias)) {
-                            return addH2NonKeywords("jdbc:h2:file:${kc.home.dir:${kc.db-url-path:" + System.getProperty("user.home") + "}}" + File.separator + "${kc.data.dir:data}"
-                                    + File.separator + "h2" + File.separator
+                            return addH2NonKeywords("jdbc:h2:file:${kc.home.dir:${kc.db-url-path:" + escapeReplacements(System.getProperty("user.home")) + "}}" + escapeReplacements(File.separator) + "${kc.data.dir:data}"
+                                    + escapeReplacements(File.separator) + "h2" + escapeReplacements(File.separator)
                                     + "keycloakdb${kc.db-url-properties:;;AUTO_SERVER=TRUE}");
                         }
                         return addH2NonKeywords("jdbc:h2:mem:keycloakdb${kc.db-url-properties:}");
+                    }
+
+                    private String escapeReplacements(String snippet) {
+                        if (File.separator.equals("\\")) {
+                            // SmallRye will do replacements of "${...}", but a "\" must not escape such an expression.
+                            // As we nest multiple expressions, and each nested expression must re-escape the backslashes,
+                            // the simplest way is to replace a backslash with a slash, as those are processed nicely on Windows.
+                            return snippet.replace("\\", "/");
+                        }
+                        return snippet;
                     }
 
                     /**
@@ -138,7 +155,7 @@ public final class Database {
         MYSQL("mysql",
                 "com.mysql.cj.jdbc.MysqlXADataSource",
                 "com.mysql.cj.jdbc.Driver",
-                "org.hibernate.dialect.MySQL8Dialect",
+                "org.hibernate.dialect.MySQLDialect",
                 "jdbc:mysql://${kc.db-url-host:localhost}:${kc.db-url-port:3306}/${kc.db-url-database:keycloak}${kc.db-url-properties:}",
                 asList("org.keycloak.connections.jpa.updater.liquibase.UpdatedMySqlDatabase")
         ),
@@ -152,16 +169,15 @@ public final class Database {
         POSTGRES("postgresql",
                 "org.postgresql.xa.PGXADataSource",
                 "org.postgresql.Driver",
-                "io.quarkus.hibernate.orm.runtime.dialect.QuarkusPostgreSQL10Dialect",
+                "org.hibernate.dialect.PostgreSQLDialect",
                 "jdbc:postgresql://${kc.db-url-host:localhost}:${kc.db-url-port:5432}/${kc.db-url-database:keycloak}${kc.db-url-properties:}",
-                asList("liquibase.database.core.PostgresDatabase", "liquibase.database.core.CockroachDatabase",
-                        "org.keycloak.connections.jpa.updater.liquibase.PostgresPlusDatabase"),
+                asList("liquibase.database.core.PostgresDatabase", "org.keycloak.connections.jpa.updater.liquibase.PostgresPlusDatabase"),
                 "postgres"
         ),
         MSSQL("mssql",
                 "com.microsoft.sqlserver.jdbc.SQLServerXADataSource",
                 "com.microsoft.sqlserver.jdbc.SQLServerDriver",
-                "org.hibernate.dialect.SQLServer2016Dialect",
+                "org.hibernate.dialect.SQLServerDialect",
                 "jdbc:sqlserver://${kc.db-url-host:localhost}:${kc.db-url-port:1433};databaseName=${kc.db-url-database:keycloak}${kc.db-url-properties:}",
                 asList("org.keycloak.quarkus.runtime.storage.database.liquibase.database.CustomMSSQLDatabase"),
                 "mssql"
@@ -169,7 +185,7 @@ public final class Database {
         ORACLE("oracle",
                 "oracle.jdbc.xa.client.OracleXADataSource",
                 "oracle.jdbc.driver.OracleDriver",
-                "org.hibernate.dialect.Oracle12cDialect",
+                "org.hibernate.dialect.OracleDialect",
                 "jdbc:oracle:thin:@//${kc.db-url-host:localhost}:${kc.db-url-port:1521}/${kc.db-url-database:keycloak}",
                 asList("liquibase.database.core.OracleDatabase")
         );

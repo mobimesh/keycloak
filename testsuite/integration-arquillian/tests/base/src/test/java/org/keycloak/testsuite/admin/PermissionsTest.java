@@ -18,10 +18,8 @@
 package org.keycloak.testsuite.admin;
 
 import org.hamcrest.Matchers;
-import org.jboss.resteasy.plugins.providers.multipart.MultipartFormDataOutput;
 import org.junit.AfterClass;
 import org.junit.Before;
-import org.junit.BeforeClass;
 import org.junit.Rule;
 import org.junit.Test;
 import org.keycloak.admin.client.Keycloak;
@@ -61,6 +59,7 @@ import org.keycloak.services.resources.admin.AdminAuth.Resource;
 import org.keycloak.testsuite.AbstractKeycloakTest;
 import org.keycloak.testsuite.Assert;
 import org.keycloak.testsuite.ProfileAssume;
+import org.keycloak.testsuite.updaters.RealmAttributeUpdater;
 import org.keycloak.testsuite.util.AdminClientUtil;
 import org.keycloak.testsuite.util.ClientBuilder;
 import org.keycloak.testsuite.util.CredentialBuilder;
@@ -69,9 +68,10 @@ import org.keycloak.testsuite.util.GreenMailRule;
 import org.keycloak.testsuite.util.IdentityProviderBuilder;
 import org.keycloak.testsuite.util.RealmBuilder;
 import org.keycloak.testsuite.util.UserBuilder;
+import org.keycloak.userprofile.DeclarativeUserProfileProvider;
 
-import javax.ws.rs.ClientErrorException;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.core.Response;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.Collections;
@@ -82,6 +82,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.fail;
 import static org.keycloak.services.resources.admin.AdminAuth.Resource.AUTHORIZATION;
 import static org.keycloak.services.resources.admin.AdminAuth.Resource.CLIENT;
@@ -126,7 +127,7 @@ public class PermissionsTest extends AbstractKeycloakTest {
         builder.user(UserBuilder.create()
                 .username("multi")
                 .role(Constants.REALM_MANAGEMENT_CLIENT_ID, AdminRoles.QUERY_GROUPS)
-                .role(Constants.REALM_MANAGEMENT_CLIENT_ID, AdminRoles.VIEW_REALM)
+                .role(Constants.REALM_MANAGEMENT_CLIENT_ID, AdminRoles.MANAGE_REALM)
                 .role(Constants.REALM_MANAGEMENT_CLIENT_ID, AdminRoles.VIEW_CLIENTS)
                 .addPassword("password"));
 
@@ -299,7 +300,30 @@ public class PermissionsTest extends AbstractKeycloakTest {
                 realm.toRepresentation();
             }
         }, Resource.REALM, false, true);
-        assertGettersEmpty(clients.get(AdminRoles.QUERY_REALMS).realm(REALM_NAME).toRepresentation());
+
+        try (RealmAttributeUpdater updater = new RealmAttributeUpdater(adminClient.realm(REALM_NAME))
+                .setAttribute(DeclarativeUserProfileProvider.REALM_USER_PROFILE_ENABLED, Boolean.TRUE.toString())
+                .update()) {
+            RealmRepresentation realm = clients.get(AdminRoles.QUERY_REALMS).realm(REALM_NAME).toRepresentation();
+            assertGettersEmpty(realm);
+            assertNull(realm.isRegistrationEmailAsUsername());
+            assertNull(realm.getAttributes());
+
+            realm = clients.get(AdminRoles.VIEW_USERS).realm(REALM_NAME).toRepresentation();
+            assertNotNull(realm.isRegistrationEmailAsUsername());
+            assertNotNull(realm.getAttributes());
+            assertNotNull(realm.getAttributes().get(DeclarativeUserProfileProvider.REALM_USER_PROFILE_ENABLED));
+
+            realm = clients.get(AdminRoles.MANAGE_USERS).realm(REALM_NAME).toRepresentation();
+            assertNotNull(realm.isRegistrationEmailAsUsername());
+            assertNotNull(realm.getAttributes());
+            assertNotNull(realm.getAttributes().get(DeclarativeUserProfileProvider.REALM_USER_PROFILE_ENABLED));
+
+            // query users only if granted through fine-grained admin
+            realm = clients.get(AdminRoles.QUERY_USERS).realm(REALM_NAME).toRepresentation();
+            assertNull(realm.isRegistrationEmailAsUsername());
+            assertNull(realm.getAttributes());
+        }
 
         // this should pass given that users granted with "query" roles are allowed to access the realm with limited access
         for (String role : AdminRoles.ALL_QUERY_ROLES) {
@@ -496,10 +520,10 @@ public class PermissionsTest extends AbstractKeycloakTest {
             }
         }, Resource.CLIENT, false, true);
         List<ClientRepresentation> l = clients.get(AdminRoles.QUERY_CLIENTS).realm(REALM_NAME).clients().findAll();
-        Assert.assertThat(l, Matchers.empty());
+        assertThat(l, Matchers.empty());
 
         l = clients.get(AdminRoles.VIEW_CLIENTS).realm(REALM_NAME).clients().findAll();
-        Assert.assertThat(l, Matchers.not(Matchers.empty()));
+        assertThat(l, Matchers.not(Matchers.empty()));
 
         ClientRepresentation client = l.get(0);
         invoke(new InvocationWithResponse() {
@@ -642,12 +666,12 @@ public class PermissionsTest extends AbstractKeycloakTest {
 
         invoke(new Invocation() {
             public void invoke(RealmResource realm) {
-                realm.clients().get(foo.getId()).getCertficateResource("nosuch").uploadJks(new MultipartFormDataOutput());
+                realm.clients().get(foo.getId()).getCertficateResource("nosuch").uploadJks(null);
             }
         }, Resource.CLIENT, true);
         invoke(new Invocation() {
             public void invoke(RealmResource realm) {
-                realm.clients().get(foo.getId()).getCertficateResource("nosuch").uploadJksCertificate(new MultipartFormDataOutput());
+                realm.clients().get(foo.getId()).getCertficateResource("nosuch").uploadJksCertificate(null);
             }
         }, Resource.CLIENT, true);
 
@@ -1321,6 +1345,7 @@ public class PermissionsTest extends AbstractKeycloakTest {
                 realm.groups().groups();
             }
         }, Resource.USER, false);
+        invoke(realm -> realm.groups().count(), Resource.USER, false);
         invoke(new InvocationWithResponse() {
             public void invoke(RealmResource realm, AtomicReference<Response> response) {
                 GroupRepresentation group = new GroupRepresentation();
@@ -1657,6 +1682,11 @@ public class PermissionsTest extends AbstractKeycloakTest {
                 clients.get(AdminRoles.QUERY_USERS).realm(REALM_NAME).clients().findAll();
             }
         }, clients.get(AdminRoles.QUERY_USERS), true);
+        invoke(new Invocation() {
+            public void invoke(RealmResource realm) {
+                clients.get(AdminRoles.VIEW_USERS).realm(REALM_NAME).users().get(user.getId()).getConfiguredUserStorageCredentialTypes();
+            }
+        }, clients.get(AdminRoles.VIEW_USERS), true);
     }
 
     @Test
@@ -1727,7 +1757,7 @@ public class PermissionsTest extends AbstractKeycloakTest {
         }, Resource.IDENTITY_PROVIDER, true);
         invoke(new Invocation() {
             public void invoke(RealmResource realm) {
-                realm.identityProviders().importFrom(new MultipartFormDataOutput());
+                realm.identityProviders().importFrom(null);
             }
         }, Resource.IDENTITY_PROVIDER, true);
     }
@@ -1771,128 +1801,23 @@ public class PermissionsTest extends AbstractKeycloakTest {
         // re-enable as part of https://github.com/keycloak/keycloak/issues/14291
         ProfileAssume.assumeFeatureDisabled(Profile.Feature.MAP_STORAGE);
 
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.partialExport(false, false);
-            }
-        }, clients.get("view-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.partialExport(true, true);
-            }
-        }, clients.get("multi"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.partialExport(true, false);
-            }
-        }, clients.get("view-realm"), false);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.partialExport(false, true);
-            }
-        }, clients.get("view-realm"), false);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.partialExport(false, false);
-            }
-        }, clients.get("none"), false);
+        invoke(realm -> realm.partialExport(false, false), clients.get("view-realm"), false);
+        invoke(realm -> realm.partialExport(false, false), clients.get("manage-realm"), true);
+        invoke(realm -> realm.partialExport(true, false), clients.get("manage-realm"), false);
+        invoke(realm -> realm.partialExport(false, true), clients.get("manage-realm"), false);
+        invoke(realm -> realm.partialExport(true, true), clients.get("multi"), true);
+        invoke(realm -> realm.partialExport(false, false), clients.get("none"), false);
     }
 
     @Test
     public void localizations() {
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmSpecificLocales();
-            }
-        }, clients.get("view-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmSpecificLocales();
-            }
-        }, clients.get("manage-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmSpecificLocales();
-            }
-        }, clients.get("multi"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmSpecificLocales();
-            }
-        }, clients.get("master-admin"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmSpecificLocales();
-            }
-        }, clients.get("none"), false);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmSpecificLocales();
-            }
-        }, clients.get("REALM2"), false);
+        verifyAnyAdminRoleReqired(realm -> realm.localization().getRealmSpecificLocales());
 
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationText("en", "test");
-            }
-        }, clients.get("view-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationText("en", "test");
-            }
-        }, clients.get("manage-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationText("en", "test");
-            }
-        }, clients.get("multi"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationText("en", "test");
-            }
-        }, clients.get("master-admin"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationText("en", "test");
-            }
-        }, clients.get("none"), false);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationText("en", "test");
-            }
-        }, clients.get("REALM2"), false);
+        verifyAnyAdminRoleReqired(realm -> realm.localization().getRealmLocalizationText("en", "test"));
 
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationTexts("en", false);
-            }
-        }, clients.get("view-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationTexts("en", false);
-            }
-        }, clients.get("manage-realm"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationTexts("en", false);
-            }
-        }, clients.get("multi"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationTexts("en", false);
-            }
-        }, clients.get("master-admin"), true);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationTexts("en", false);
-            }
-        }, clients.get("none"), false);
-        invoke(new Invocation() {
-            public void invoke(RealmResource realm) {
-                realm.localization().getRealmLocalizationTexts("en", false);
-            }
-        }, clients.get("REALM2"), false);
-
+        verifyAnyAdminRoleReqired(realm -> realm.localization().getRealmLocalizationTexts("en"));
+        verifyAnyAdminRoleReqired(realm -> realm.localization().getRealmLocalizationTexts("en", false));
+        
         invoke(new Invocation() {
             public void invoke(RealmResource realm) {
                 realm.localization().createOrUpdateRealmLocalizationTexts("en", Collections.<String, String>emptyMap());
@@ -1970,6 +1895,15 @@ public class PermissionsTest extends AbstractKeycloakTest {
                 realm.localization().deleteRealmLocalizationTexts("en");
             }
         }, clients.get("REALM2"), false);
+    }
+
+    private void verifyAnyAdminRoleReqired(Invocation invocation) {
+        invoke(invocation, clients.get("view-realm"), true);
+        invoke(invocation, clients.get("manage-realm"), true);
+        invoke(invocation, clients.get("multi"), true);
+        invoke(invocation, clients.get("master-admin"), true);
+        invoke(invocation, clients.get("none"), false);
+        invoke(invocation, clients.get("REALM2"), false);
     }
 
     private void invoke(final Invocation invocation, Resource resource, boolean manage) {

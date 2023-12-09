@@ -3,21 +3,23 @@ package org.keycloak.config;
 public enum OptionCategory {
     // ordered by name asc
     CACHE("Cache", 10, ConfigSupportLevel.SUPPORTED),
-    STORAGE("Storage", 15, ConfigSupportLevel.EXPERIMENTAL),
     DATABASE("Database", 20, ConfigSupportLevel.SUPPORTED),
     TRANSACTION("Transaction",30, ConfigSupportLevel.SUPPORTED),
     FEATURE("Feature", 40, ConfigSupportLevel.SUPPORTED),
     HOSTNAME("Hostname", 50, ConfigSupportLevel.SUPPORTED),
     HTTP("HTTP/TLS", 60, ConfigSupportLevel.SUPPORTED),
     HEALTH("Health", 70, ConfigSupportLevel.SUPPORTED),
+    CONFIG("Config", 75, ConfigSupportLevel.SUPPORTED),
     METRICS("Metrics", 80, ConfigSupportLevel.SUPPORTED),
     PROXY("Proxy", 90, ConfigSupportLevel.SUPPORTED),
     VAULT("Vault", 100, ConfigSupportLevel.SUPPORTED),
     LOGGING("Logging", 110, ConfigSupportLevel.SUPPORTED),
-    SECURITY("Security", 120, ConfigSupportLevel.EXPERIMENTAL),
+    SECURITY("Security", 120, ConfigSupportLevel.SUPPORTED),
+    EXPORT("Export", 130, ConfigSupportLevel.SUPPORTED),
+    IMPORT("Import", 140, ConfigSupportLevel.SUPPORTED),
     GENERAL("General", 999, ConfigSupportLevel.SUPPORTED);
 
-    private String heading;
+    private final String heading;
     //Categories with a lower number are shown before groups with a higher number
     private final int order;
     private final ConfigSupportLevel supportLevel;

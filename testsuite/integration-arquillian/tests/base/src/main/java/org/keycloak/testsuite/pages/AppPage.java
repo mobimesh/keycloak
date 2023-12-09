@@ -22,7 +22,7 @@ import org.keycloak.protocol.oidc.OIDCLoginProtocolService;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.support.FindBy;
 
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriBuilder;
 
 import static org.keycloak.testsuite.util.UIUtils.clickLink;
 import static org.keycloak.testsuite.util.ServerURLs.removeDefaultPorts;
@@ -53,6 +53,10 @@ public class AppPage extends AbstractPage {
         clickLink(accountLink);
     }
 
+    public WebElement getAccountLink() {
+        return accountLink;
+    }
+
     public enum RequestType {
         AUTH_RESPONSE, LOGOUT_REQUEST, APP_REQUEST
     }
@@ -60,5 +64,7 @@ public class AppPage extends AbstractPage {
     public void logout(String idTokenHint) {
         oauth.idTokenHint(idTokenHint).openLogout();
     }
+
+
 
 }

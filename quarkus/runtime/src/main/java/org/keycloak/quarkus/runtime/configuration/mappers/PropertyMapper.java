@@ -27,7 +27,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiFunction;
-import java.util.stream.Collectors;
 
 import io.smallrye.config.ConfigSourceInterceptorContext;
 import io.smallrye.config.ConfigValue;
@@ -95,13 +94,13 @@ public class PropertyMapper<T> {
         }
 
         // try to obtain the value for the property we want to map first
-        ConfigValue config = context.proceed(from);
+        ConfigValue config = convertValue(context.proceed(from));
 
         if (config == null) {
             if (mapFrom != null) {
                 // if the property we want to map depends on another one, we use the value from the other property to call the mapper
                 String parentKey = MicroProfileConfigProvider.NS_KEYCLOAK_PREFIX + mapFrom;
-                ConfigValue parentValue = context.proceed(parentKey);
+                ConfigValue parentValue = convertValue(context.proceed(parentKey));
 
                 if (parentValue == null) {
                     // parent value not explicitly set, try to resolve the default value set to the parent property
@@ -112,10 +111,10 @@ public class PropertyMapper<T> {
                     }
                 }
 
-                return transformValue(ofNullable(parentValue == null ? null : parentValue.getValue()), context);
+                return transformValue(name, ofNullable(parentValue == null ? null : parentValue.getValue()), context, null);
             }
 
-            ConfigValue defaultValue = transformValue(this.option.getDefaultValue().map(Objects::toString), context);
+            ConfigValue defaultValue = transformValue(name, this.option.getDefaultValue().map(Objects::toString), context, null);
 
             if (defaultValue != null) {
                 return defaultValue;
@@ -125,24 +124,20 @@ public class PropertyMapper<T> {
             ConfigValue current = context.proceed(name);
 
             if (current != null) {
-                return transformValue(ofNullable(current.getValue()), context);
+                return transformValue(name, ofNullable(current.getValue()), context, current.getConfigSourceName());
             }
 
             return current;
         }
 
-        if (config.getName().equals(name)) {
-            return config;
-        }
-
-        ConfigValue value = transformValue(ofNullable(config.getValue()), context);
+        ConfigValue transformedValue = transformValue(name, ofNullable(config.getValue()), context, config.getConfigSourceName());
 
         // we always fallback to the current value from the property we are mapping
-        if (value == null) {
+        if (transformedValue == null) {
             return context.proceed(name);
         }
 
-        return value;
+        return transformedValue;
     }
 
     public Option<T> getOption() { return this.option; }
@@ -195,13 +190,14 @@ public class PropertyMapper<T> {
         return mask;
     }
 
-    private ConfigValue transformValue(Optional<String> value, ConfigSourceInterceptorContext context) {
+    private ConfigValue transformValue(String name, Optional<String> value, ConfigSourceInterceptorContext context, String configSourceName) {
         if (value == null) {
             return null;
         }
 
-        if (mapper == null) {
-            return ConfigValue.builder().withName(to).withValue(value.orElse(null)).build();
+        if (mapper == null || (mapFrom == null && name.equals(getFrom()))) {
+            // no mapper set or requesting a property that does not depend on other property, just return the value from the config source
+            return ConfigValue.builder().withName(name).withValue(value.orElse(null)).withConfigSourceName(configSourceName).build();
         }
 
         Optional<String> mappedValue = mapper.apply(value, context);
@@ -210,7 +206,16 @@ public class PropertyMapper<T> {
             return null;
         }
 
-        return ConfigValue.builder().withName(to).withValue(mappedValue.get()).withRawValue(value.orElse(null)).build();
+        return ConfigValue.builder().withName(name).withValue(mappedValue.get()).withRawValue(value.orElse(null))
+                .withConfigSourceName(configSourceName).build();
+    }
+
+    private ConfigValue convertValue(ConfigValue configValue) {
+        if (configValue == null) {
+            return null;
+        }
+
+        return configValue.withValue(ofNullable(configValue.getValue()).map(String::trim).orElse(null));
     }
 
     public static class Builder<T> {

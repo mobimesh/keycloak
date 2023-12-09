@@ -17,8 +17,7 @@
 
 package org.keycloak.connections.jpa.util;
 
-import org.hibernate.engine.query.spi.sql.NativeSQLQueryReturn;
-import org.hibernate.engine.query.spi.sql.NativeSQLQuerySpecification;
+import jakarta.persistence.ValidationMode;
 import org.jboss.logging.Logger;
 import org.hibernate.engine.spi.SessionFactoryImplementor;
 import org.hibernate.jpa.boot.internal.ParsedPersistenceXmlDescriptor;
@@ -28,14 +27,13 @@ import org.keycloak.connections.jpa.entityprovider.JpaEntityProvider;
 import org.keycloak.utils.ProxyClassLoader;
 import org.keycloak.models.KeycloakSession;
 
-import javax.persistence.EntityManager;
-import javax.persistence.EntityManagerFactory;
-import javax.persistence.spi.PersistenceUnitTransactionType;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.spi.PersistenceUnitTransactionType;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -53,7 +51,7 @@ public class JpaUtils {
 
     public static String getTableNameForNativeQuery(String tableName, EntityManager em) {
         String schema = (String) em.getEntityManagerFactory().getProperties().get(HIBERNATE_DEFAULT_SCHEMA);
-        return (schema==null) ? tableName : schema + "." + tableName;
+        return (schema==null) ? tableName : "\"" + schema + "\"." + tableName;
     }
 
     public static EntityManagerFactory createEntityManagerFactory(KeycloakSession session, String unitName, Map<String, Object> properties, boolean jta) {
@@ -72,6 +70,7 @@ public class JpaUtils {
                 // Now build the entity manager factory, supplying a proxy classloader, so Hibernate will be able
                 // to find and load the extra provided entities.
                 persistenceUnit.setTransactionType(txType);
+                persistenceUnit.setValidationMode(ValidationMode.NONE.name());
                 return Bootstrap.getEntityManagerFactoryBuilder(persistenceUnit, properties,
                         new ProxyClassLoader(providedEntities)).build();
             }
@@ -175,7 +174,6 @@ public class JpaUtils {
      * should exist inside the jar file. The default file contains all the
      * needed queries and the specific one can overload all or some of them for
      * that database type.
-     * @param em The entity manager to use
      * @param databaseType The database type as managed in
      * @return
      */
@@ -224,11 +222,8 @@ public class JpaUtils {
         SessionFactoryImplementor sessionFactory = entityManager.getEntityManagerFactory().unwrap(SessionFactoryImplementor.class);
 
         if (isNative) {
-            NativeSQLQuerySpecification spec = new NativeSQLQuerySpecification(querySql, new NativeSQLQueryReturn[0], Collections.emptySet());
-            sessionFactory.getQueryPlanCache().getNativeSQLQueryPlan(spec);
             sessionFactory.addNamedQuery(queryName, entityManager.createNativeQuery(querySql));
         } else {
-            sessionFactory.getQueryPlanCache().getHQLQueryPlan(querySql, false, Collections.emptyMap());
             sessionFactory.addNamedQuery(queryName, entityManager.createQuery(querySql));
         }
     }

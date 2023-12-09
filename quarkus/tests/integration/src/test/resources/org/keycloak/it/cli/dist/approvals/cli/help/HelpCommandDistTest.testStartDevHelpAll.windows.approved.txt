@@ -16,10 +16,11 @@ Options:
 
 Cache:
 
---cache <type>       Defines the cache mechanism for high-availability. By default, a 'ispn' cache
-                       is used to create a cluster between multiple server nodes. A 'local' cache
-                       disables clustering and is intended for development and testing purposes.
-                       Possible values are: ispn, local. Default: ispn.
+--cache <type>       Defines the cache mechanism for high-availability. By default in production
+                       mode, a 'ispn' cache is used to create a cluster between multiple server
+                       nodes. By default in development mode, a 'local' cache disables clustering
+                       and is intended for development and testing purposes. Possible values are:
+                       ispn, local. Default: ispn.
 --cache-config-file <file>
                      Defines the file from which cache configuration should be loaded from. The
                        configuration file is relative to the 'conf/' directory.
@@ -28,68 +29,12 @@ Cache:
                        This option only takes effect if 'cache' is set to 'ispn'. Default: udp.
                        Possible values are: tcp, udp, kubernetes, ec2, azure, google.
 
-Storage (Experimental):
-
---storage <type>     Experimental: Sets the default storage mechanism for all areas. Possible
-                       values are: jpa, chm, hotrod.
---storage-area-auth-session <type>
-                     Experimental: Sets a storage mechanism for authentication sessions. Possible
-                       values are: jpa, chm, hotrod.
---storage-area-authorization <type>
-                     Experimental: Sets a storage mechanism for authorizations. Possible values
-                       are: jpa, chm, hotrod.
---storage-area-client <type>
-                     Experimental: Sets a storage mechanism for clients. Possible values are: jpa,
-                       chm, hotrod.
---storage-area-client-scope <type>
-                     Experimental: Sets a storage mechanism for client scopes. Possible values are:
-                       jpa, chm, hotrod.
---storage-area-event-admin <type>
-                     Experimental: Sets a storage mechanism for admin events. Possible values are:
-                       jpa, chm, hotrod.
---storage-area-event-auth <type>
-                     Experimental: Sets a storage mechanism for authentication and authorization
-                       events. Possible values are: jpa, chm, hotrod.
---storage-area-group <type>
-                     Experimental: Sets a storage mechanism for groups. Possible values are: jpa,
-                       chm, hotrod.
---storage-area-login-failure <type>
-                     Experimental: Sets a storage mechanism for login failures. Possible values
-                       are: jpa, chm, hotrod.
---storage-area-realm <type>
-                     Experimental: Sets a storage mechanism for realms. Possible values are: jpa,
-                       chm, hotrod.
---storage-area-role <type>
-                     Experimental: Sets a storage mechanism for roles. Possible values are: jpa,
-                       chm, hotrod.
---storage-area-single-use-object <type>
-                     Experimental: Sets a storage mechanism for single use objects. Possible values
-                       are: jpa, chm, hotrod.
---storage-area-user <type>
-                     Experimental: Sets a storage mechanism for users. Possible values are: jpa,
-                       chm, hotrod.
---storage-area-user-session <type>
-                     Experimental: Sets a storage mechanism for user and client sessions. Possible
-                       values are: jpa, chm, hotrod.
---storage-deployment-state-version-seed <type>
-                     Experimental: Secret that serves as a seed to mask the version number of
-                       Keycloak in URLs. Need to be identical across all servers in the cluster.
-                       Will default to a random number generated when starting the server which is
-                       secure but will lead to problems when a loadbalancer without sticky sessions
-                       is used or nodes are restarted.
---storage-hotrod-host <host>
-                     Experimental: Sets the host of the Infinispan server.
---storage-hotrod-password <password>
-                     Experimental: Sets the password of the Infinispan user.
---storage-hotrod-port <port>
-                     Experimental: Sets the port of the Infinispan server.
---storage-hotrod-username <username>
-                     Experimental: Sets the username of the Infinispan user.
-
 Database:
 
 --db <vendor>        The database vendor. Possible values are: dev-file, dev-mem, mariadb, mssql,
                        mysql, oracle, postgres. Default: dev-file.
+--db-driver <driver> The fully qualified class name of the JDBC driver. If not set, a default
+                       driver is set accordingly to the chosen database.
 --db-password <password>
                      The password of the database user.
 --db-pool-initial-size <size>
@@ -124,19 +69,21 @@ Transaction:
 
 Feature:
 
---features <feature> Enables a set of one or more features. Possible values are: authorization,
-                       account2, account-api, admin-fine-grained-authz, admin-api, admin, admin2,
-                       docker, impersonation, openshift-integration, scripts, token-exchange,
-                       web-authn, client-policies, ciba, map-storage, par,
-                       declarative-user-profile, dynamic-scopes, client-secret-rotation,
-                       step-up-authentication, recovery-codes, update-email, js-adapter, preview.
+--features <feature> Enables a set of one or more features. Possible values are: account-api,
+                       account2, account3, admin-api, admin-fine-grained-authz, admin2,
+                       authorization, ciba, client-policies, client-secret-rotation,
+                       declarative-user-profile, device-flow, docker, dpop, dynamic-scopes, fips,
+                       impersonation, js-adapter, kerberos, linkedin-oauth, map-storage, par,
+                       preview, recovery-codes, scripts, step-up-authentication, token-exchange,
+                       transient-users, update-email, web-authn.
 --features-disabled <feature>
-                     Disables a set of one or more features. Possible values are: authorization,
-                       account2, account-api, admin-fine-grained-authz, admin-api, admin, admin2,
-                       docker, impersonation, openshift-integration, scripts, token-exchange,
-                       web-authn, client-policies, ciba, map-storage, par,
-                       declarative-user-profile, dynamic-scopes, client-secret-rotation,
-                       step-up-authentication, recovery-codes, update-email, js-adapter, preview.
+                     Disables a set of one or more features. Possible values are: account-api,
+                       account2, account3, admin-api, admin-fine-grained-authz, admin2,
+                       authorization, ciba, client-policies, client-secret-rotation,
+                       declarative-user-profile, device-flow, docker, dpop, dynamic-scopes, fips,
+                       impersonation, js-adapter, kerberos, linkedin-oauth, map-storage, par,
+                       preview, recovery-codes, scripts, step-up-authentication, token-exchange,
+                       transient-users, update-email, web-authn.
 
 Hostname:
 
@@ -169,6 +116,9 @@ HTTP/TLS:
 --http-enabled <true|false>
                      Enables the HTTP listener. Default: false.
 --http-host <host>   The used HTTP Host. Default: 0.0.0.0.
+--http-max-queued-requests <requests>
+                     Maximum number of queued HTTP requests. Use this to shed load in an overload
+                       situation. Excess requests will return a "503 Server not Available" response.
 --http-port <port>   The used HTTP port. Default: 8080.
 --http-relative-path <path>
                      Set the path relative to '/' for serving resources. The path must start with a
@@ -189,10 +139,11 @@ HTTP/TLS:
                      The password of the key store file. Default: password.
 --https-key-store-type <type>
                      The type of the key store file. If not given, the type is automatically
-                       detected based on the file name.
+                       detected based on the file name. If 'fips-mode' is set to 'strict' and no
+                       value is set, it defaults to 'BCFKS'.
 --https-port <port>  The used HTTPS port. Default: 8443.
 --https-protocols <protocols>
-                     The list of protocols to explicitly enable. Default: TLSv1.3.
+                     The list of protocols to explicitly enable. Default: TLSv1.3,TLSv1.2.
 --https-trust-store-file <file>
                      The trust store which holds the certificate information of the certificates to
                        trust.
@@ -200,7 +151,8 @@ HTTP/TLS:
                      The password of the trust store file.
 --https-trust-store-type <type>
                      The type of the trust store file. If not given, the type is automatically
-                       detected based on the file name.
+                       detected based on the file name. If 'fips-mode' is set to 'strict' and no
+                       value is set, it defaults to 'BCFKS'.
 
 Health:
 
@@ -222,7 +174,7 @@ Proxy:
 
 Vault:
 
---vault <provider>   Enables a vault provider. Possible values are: file, hashicorp.
+--vault <provider>   Enables a vault provider. Possible values are: file.
 --vault-dir <dir>    If set, secrets can be obtained by reading the content of files within the
                        given directory.
 
@@ -276,11 +228,14 @@ Logging:
                        categories and their levels. For the root category, you don't need to
                        specify a category. Default: info.
 
-Security (Experimental):
+Security:
 
---fips-mode <mode>   Experimental: Sets the FIPS mode. If 'enabled' is set, FIPS is enabled but on
+--fips-mode <mode>   Sets the FIPS mode. If 'non-strict' is set, FIPS is enabled but on
                        non-approved mode. For full FIPS compliance, set 'strict' to run on approved
-                       mode. Possible values are: enabled, strict, disabled. Default: disabled.
+                       mode. This option defaults to 'disabled' when 'fips' feature is disabled,
+                       which is by default. This option defaults to 'non-strict' when 'fips'
+                       feature is enabled. Possible values are: non-strict, strict. Default:
+                       disabled.
 
 Do NOT start the server using this command when deploying to production.
 

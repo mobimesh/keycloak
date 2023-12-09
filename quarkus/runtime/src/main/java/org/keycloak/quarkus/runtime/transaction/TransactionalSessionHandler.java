@@ -17,11 +17,10 @@
 
 package org.keycloak.quarkus.runtime.transaction;
 
-import static org.keycloak.services.resources.KeycloakApplication.getSessionFactory;
-
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 import org.keycloak.models.KeycloakTransactionManager;
+import org.keycloak.quarkus.runtime.integration.QuarkusKeycloakSessionFactory;
 import org.keycloak.services.DefaultKeycloakSession;
 
 /**
@@ -37,10 +36,9 @@ public interface TransactionalSessionHandler {
      * @return a transactional keycloak session
      */
     default KeycloakSession create() {
-        KeycloakSessionFactory sessionFactory = getSessionFactory();
+        KeycloakSessionFactory sessionFactory = QuarkusKeycloakSessionFactory.getInstance();
         KeycloakSession session = sessionFactory.create();
-        KeycloakTransactionManager tx = session.getTransactionManager();
-        tx.begin();
+        session.getTransactionManager().begin();
         return session;
     }
 
@@ -50,22 +48,10 @@ public interface TransactionalSessionHandler {
      * @param session a transactional session
      */
     default void close(KeycloakSession session) {
-        if (DefaultKeycloakSession.class.cast(session).isClosed()) {
+        if (session == null || DefaultKeycloakSession.class.cast(session).isClosed()) {
             return;
         }
 
-        KeycloakTransactionManager tx = session.getTransactionManager();
-
-        try {
-            if (tx.isActive()) {
-                if (tx.getRollbackOnly()) {
-                    tx.rollback();
-                } else {
-                    tx.commit();
-                }
-            }
-        } finally {
-            session.close();
-        }
+        session.close();
     }
 }

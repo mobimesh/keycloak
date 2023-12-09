@@ -138,6 +138,7 @@ public class GroupAdapter implements GroupModel {
 
     @Override
     public Stream<String> getAttributeStream(String name) {
+        if (isUpdated()) return updated.getAttributeStream(name);
         List<String> values = cached.getAttributes(modelSupplier).get(name);
         if (values == null) return Stream.empty();
         return values.stream();
@@ -145,6 +146,7 @@ public class GroupAdapter implements GroupModel {
 
     @Override
     public Map<String, List<String>> getAttributes() {
+        if (isUpdated()) return updated.getAttributes();
         return cached.getAttributes(modelSupplier);
     }
 
@@ -232,10 +234,32 @@ public class GroupAdapter implements GroupModel {
             }
             subGroups.add(subGroup);
         }
-        return subGroups.stream();
+        return subGroups.stream().sorted(GroupModel.COMPARE_BY_NAME);
     }
 
+    @Override
+    public Stream<GroupModel> getSubGroupsStream(String search, Integer firstResult, Integer maxResults) {
+        if (isUpdated()) return updated.getSubGroupsStream(search, firstResult, maxResults);
+        return modelSupplier.get().getSubGroupsStream(search, firstResult, maxResults);
+    }
 
+    @Override
+    public Stream<GroupModel> getSubGroupsStream(Integer firstResult, Integer maxResults) {
+        if (isUpdated()) return updated.getSubGroupsStream(firstResult, maxResults);
+        return modelSupplier.get().getSubGroupsStream(firstResult, maxResults);
+    }
+
+    @Override
+    public Stream<GroupModel> getSubGroupsStream(String search, Boolean exact, Integer firstResult, Integer maxResults) {
+        if (isUpdated()) return updated.getSubGroupsStream(search, exact, firstResult, maxResults);
+        return modelSupplier.get().getSubGroupsStream(search, exact, firstResult, maxResults);
+    }
+
+    @Override
+    public Long getSubGroupsCount() {
+        if (isUpdated()) return updated.getSubGroupsCount();
+        return modelSupplier.get().getSubGroupsCount();
+    }
 
     @Override
     public void setParent(GroupModel group) {

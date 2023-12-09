@@ -17,29 +17,18 @@
 package org.keycloak.testsuite.model.session;
 
 import org.hamcrest.Matchers;
-import org.infinispan.client.hotrod.RemoteCache;
 import org.junit.Assert;
 import org.junit.Test;
-import org.keycloak.common.util.Time;
 import org.keycloak.models.AuthenticatedClientSessionModel;
 import org.keycloak.models.ClientModel;
 import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.RealmProvider;
-import org.keycloak.models.UserManager;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserProvider;
 import org.keycloak.models.UserSessionModel;
 import org.keycloak.models.UserSessionProvider;
-import org.keycloak.models.map.storage.ModelEntityUtil;
-import org.keycloak.models.map.storage.chm.ConcurrentHashMapStorageProviderFactory;
-import org.keycloak.models.map.storage.hotRod.connections.DefaultHotRodConnectionProviderFactory;
-import org.keycloak.models.map.storage.hotRod.connections.HotRodConnectionProvider;
-import org.keycloak.models.map.storage.hotRod.userSession.HotRodUserSessionEntity;
-import org.keycloak.models.map.userSession.MapUserSessionProvider;
-import org.keycloak.models.map.userSession.MapUserSessionProviderFactory;
-import org.keycloak.models.sessions.infinispan.InfinispanUserSessionProviderFactory;
 import org.keycloak.models.sessions.infinispan.changes.sessions.PersisterLastSessionRefreshStoreFactory;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.ResetTimeOffsetEvent;
@@ -51,7 +40,6 @@ import org.keycloak.timer.TimerProvider;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -60,7 +48,6 @@ import java.util.stream.Collectors;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.Assume.assumeFalse;
 import static org.keycloak.testsuite.model.session.UserSessionPersisterProviderTest.createClients;
 import static org.keycloak.testsuite.model.session.UserSessionPersisterProviderTest.createSessions;
 
@@ -77,7 +64,7 @@ public class UserSessionProviderModelTest extends KeycloakModelTest {
 
     @Override
     public void createEnvironment(KeycloakSession s) {
-        RealmModel realm = s.realms().createRealm("test");
+        RealmModel realm = createRealm(s, "test");
         realm.setOfflineSessionIdleTimeout(Constants.DEFAULT_OFFLINE_SESSION_IDLE_TIMEOUT);
         realm.setDefaultRole(s.roles().addRealmRole(realm, Constants.DEFAULT_ROLES_ROLE_PREFIX + "-" + realm.getName()));
         realm.setSsoSessionIdleTimeout(1800);
@@ -94,20 +81,6 @@ public class UserSessionProviderModelTest extends KeycloakModelTest {
 
     @Override
     public void cleanEnvironment(KeycloakSession s) {
-        RealmModel realm = s.realms().getRealm(realmId);
-        s.sessions().removeUserSessions(realm);
-
-        UserModel user1 = s.users().getUserByUsername(realm, "user1");
-        UserModel user2 = s.users().getUserByUsername(realm, "user2");
-
-        UserManager um = new UserManager(s);
-        if (user1 != null) {
-            um.removeUser(realm, user1);
-        }
-        if (user2 != null) {
-            um.removeUser(realm, user2);
-        }
-
         s.realms().removeRealm(realmId);
     }
 
@@ -179,22 +152,8 @@ public class UserSessionProviderModelTest extends KeycloakModelTest {
                 Assert.assertEquals(origSessions[1], userSession);
             });
 
-
-            // not possible to expire client session without expiring user sessions with time offset in map storage because
-            // expiration in map storage takes min of (clientSessionIdleExpiration, ssoSessionIdleTimeout)
             inComittedTransaction(session -> {
-                if (session.getProvider(UserSessionProvider.class) instanceof MapUserSessionProvider) {
-                    RealmModel realm = session.realms().getRealm(realmId);
-
-                    UserSessionModel userSession = session.sessions().getUserSession(realm, origSessions[0].getId());
-
-                    userSession.getAuthenticatedClientSessions().values().stream().forEach(clientSession -> {
-                        // expire client sessions
-                        clientSession.setTimestamp(1);
-                    });
-                } else {
-                    Time.setOffset(1000);
-                }
+                setTimeOffset(1000);
             });
 
             inComittedTransaction(session -> {
@@ -211,7 +170,7 @@ public class UserSessionProviderModelTest extends KeycloakModelTest {
                 });
             });
         } finally {
-            Time.setOffset(0);
+            setTimeOffset(0);
             kcSession.getKeycloakSessionFactory().publish(new ResetTimeOffsetEvent());
             if (timer != null && timerTaskCtx != null) {
                 timer.schedule(timerTaskCtx.getRunnable(), timerTaskCtx.getIntervalMillis(), PersisterLastSessionRefreshStoreFactory.DB_LSR_PERIODIC_TASK_NAME);
@@ -245,7 +204,6 @@ public class UserSessionProviderModelTest extends KeycloakModelTest {
     }
 
     @Test
-    @RequireProvider(value = UserSessionProvider.class, only = InfinispanUserSessionProviderFactory.PROVIDER_ID)
     public void testClientSessionIsNotPersistedForTransientUserSession() {
         Object[] transientUserSessionWithClientSessionId = inComittedTransaction(session -> {
             RealmModel realm = session.realms().getRealm(realmId);
@@ -271,38 +229,14 @@ public class UserSessionProviderModelTest extends KeycloakModelTest {
     }
 
     @Test
-    @RequireProvider(value = HotRodConnectionProvider.class, only = DefaultHotRodConnectionProviderFactory.PROVIDER_ID)
-    public void testRemoteCachesParallel() throws InterruptedException {
-        inIndependentFactories(4, 30, () -> inComittedTransaction(session -> {
-            HotRodConnectionProvider provider = session.getProvider(HotRodConnectionProvider.class);
-            RemoteCache<String, HotRodUserSessionEntity> remoteCache = provider.getRemoteCache(ModelEntityUtil.getModelName(UserSessionModel.class));
-            HotRodUserSessionEntity userSessionEntity = new HotRodUserSessionEntity();
-            userSessionEntity.id = UUID.randomUUID().toString();
-            remoteCache.put(userSessionEntity.id, userSessionEntity);
-        }));
-
-        inComittedTransaction(session -> {
-            HotRodConnectionProvider provider = session.getProvider(HotRodConnectionProvider.class);
-            RemoteCache<String, HotRodUserSessionEntity> remoteCache = provider.getRemoteCache(ModelEntityUtil.getModelName(UserSessionModel.class));
-            assertThat(remoteCache.size(), Matchers.is(4));
-        });
-    }
-
-    @Test
     public void testCreateUserSessionsParallel() throws InterruptedException {
-        // Skip the test if MapUserSessionProvider == CHM
-        String usProvider = CONFIG.getConfig().get("userSessions.provider");
-        String usMapStorageProvider = CONFIG.getConfig().get("userSessions.map.storage.provider");
-        assumeFalse(MapUserSessionProviderFactory.PROVIDER_ID.equals(usProvider) &&
-                (usMapStorageProvider == null || ConcurrentHashMapStorageProviderFactory.PROVIDER_ID.equals(usMapStorageProvider)));
-
         Set<String> userSessionIds = Collections.newSetFromMap(new ConcurrentHashMap<>());
         CountDownLatch latch = new CountDownLatch(4);
 
         inIndependentFactories(4, 30, () -> {
             withRealm(realmId, (session, realm) -> {
                 UserModel user = session.users().getUserByUsername(realm, "user1");
-                UserSessionModel userSession = session.sessions().createUserSession(realm, user, "user1", "", "", false, null, null);
+                UserSessionModel userSession = session.sessions().createUserSession(null, realm, user, "user1", "", "", false, null, null, UserSessionModel.SessionPersistenceState.PERSISTENT);
                 userSessionIds.add(userSession.getId());
 
                 latch.countDown();

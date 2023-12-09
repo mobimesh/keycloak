@@ -1,6 +1,6 @@
 <#macro registrationLayout bodyClass="" displayInfo=false displayMessage=true displayRequiredFields=false>
 <!DOCTYPE html>
-<html class="${properties.kcHtmlClass!}">
+<html class="${properties.kcHtmlClass!}"<#if realm.internationalizationEnabled> lang="${locale.currentLanguageTag}"</#if>>
 
 <head>
     <meta charset="utf-8">
@@ -33,6 +33,17 @@
         <#list scripts as script>
             <script src="${script}" type="text/javascript"></script>
         </#list>
+    </#if>
+    <#if authenticationSession??>
+        <script type="module">
+            import { checkCookiesAndSetTimer } from "${url.resourcesPath}/js/authChecker.js";
+
+            checkCookiesAndSetTimer(
+              "${authenticationSession.authSessionId}",
+              "${authenticationSession.tabId}",
+              "${url.ssoLoginInOtherTabsUrl}"
+            );
+        </script>
     </#if>
 </head>
 

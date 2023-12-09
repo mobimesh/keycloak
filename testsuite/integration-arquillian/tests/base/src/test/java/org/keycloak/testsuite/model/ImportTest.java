@@ -38,9 +38,9 @@ import org.keycloak.testsuite.ProfileAssume;
 import org.keycloak.testsuite.arquillian.annotation.EnableFeature;
 import org.keycloak.testsuite.runonserver.RunOnServerException;
 import org.keycloak.userprofile.UserProfileProvider;
-import org.keycloak.userprofile.config.UPAttribute;
-import org.keycloak.userprofile.config.UPAttributeSelector;
-import org.keycloak.userprofile.config.UPConfig;
+import org.keycloak.representations.userprofile.config.UPAttribute;
+import org.keycloak.representations.userprofile.config.UPAttributeSelector;
+import org.keycloak.representations.userprofile.config.UPConfig;
 import org.keycloak.userprofile.config.UPConfigUtils;
 import org.keycloak.util.JsonSerialization;
 
@@ -92,23 +92,17 @@ public class ImportTest extends AbstractTestRealmKeycloakTest {
 
             // Need a new thread to not get context from thread processing request to run-on-server endpoint
             Thread t = new Thread(() -> {
-                try {
-                    KeycloakSession ses = session.getKeycloakSessionFactory().create();
+                RealmModel realmModel;
+                try (KeycloakSession ses = session.getKeycloakSessionFactory().create()) {
                     ses.getContext().setRealm(session.getContext().getRealm());
                     ses.getTransactionManager().begin();
 
-                    RealmModel realmModel = new RealmManager(ses).importRealm(testRealm);
+                    realmModel = new RealmManager(ses).importRealm(testRealm);
+                }
 
-                    ses.getTransactionManager().commit();
-                    ses.close();
-
-                    ses = session.getKeycloakSessionFactory().create();
-
+                try (KeycloakSession ses = session.getKeycloakSessionFactory().create()) {
                     ses.getTransactionManager().begin();
                     session.realms().removeRealm(realmModel.getId());
-                    ses.getTransactionManager().commit();
-
-                    ses.close();
                 } catch (Throwable th) {
                     err.set(th);
                 }
@@ -163,7 +157,7 @@ public class ImportTest extends AbstractTestRealmKeycloakTest {
             session.getContext().setRealm(realm);
 
             UserProfileProvider provider = session.getProvider(UserProfileProvider.class);
-            UPConfig config = UPConfigUtils.readConfig(new ByteArrayInputStream(provider.getConfiguration().getBytes()));
+            UPConfig config = provider.getConfiguration();
 
             Assert.assertTrue(config.getAttributes().stream().map(UPAttribute::getName).anyMatch("email"::equals));
             Assert.assertTrue(config.getAttributes().stream().map(UPAttribute::getName).anyMatch("test"::equals));

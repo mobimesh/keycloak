@@ -18,16 +18,25 @@
 package org.keycloak.it.cli.dist;
 
 import static org.junit.Assert.assertEquals;
+import static org.keycloak.it.cli.dist.GelfRemovedTest.INCLUDE_GELF_PROPERTY;
 import static org.keycloak.quarkus.runtime.cli.command.AbstractStartCommand.OPTIMIZED_BUILD_OPTION_LONG;
 
 import java.util.List;
+
+import org.approvaltests.Approvals;
+import org.approvaltests.namer.NamedEnvironment;
+import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.OS;
+import org.keycloak.it.approvaltests.KcNamerFactory;
 import org.keycloak.it.junit5.extension.CLIResult;
 import org.keycloak.it.junit5.extension.DistributionTest;
 import org.keycloak.it.junit5.extension.RawDistOnly;
 import org.keycloak.it.utils.KeycloakDistribution;
 import org.keycloak.quarkus.runtime.cli.command.Build;
+import org.keycloak.quarkus.runtime.cli.command.Export;
+import org.keycloak.quarkus.runtime.cli.command.Import;
 import org.keycloak.quarkus.runtime.cli.command.Start;
 import org.keycloak.quarkus.runtime.cli.command.StartDev;
 
@@ -38,76 +47,107 @@ import io.quarkus.test.junit.main.LaunchResult;
 @RawDistOnly(reason = "Verifying the help message output doesn't need long spin-up of docker dist tests.")
 public class HelpCommandDistTest {
 
+    @BeforeAll
+    public static void assumeGelfEnabled() {
+        Assumptions.assumeTrue(Boolean.getBoolean(INCLUDE_GELF_PROPERTY), "Assume GELF support is given in order to simplify these test cases");
+    }
+
     @Test
     @Launch({})
     void testDefaultToHelp(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
-    @Launch({ "--help" })
+    @Launch({"--help"})
     void testHelp(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ "-h" })
     void testHelpShort(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--help", OPTIMIZED_BUILD_OPTION_LONG})
     void testStartOptimizedHelp(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--help" })
     void testStartHelp(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--optimized", "--help-all" })
     void testStartOptimizedHelpAll(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
-        cliResult.assertNoMessage("--storage ");
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ StartDev.NAME, "--help" })
     void testStartDevHelp(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ StartDev.NAME, "--help-all" })
     void testStartDevHelpAll(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Start.NAME, "--help-all" })
     void testStartHelpAll(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
-        cliResult.assertMessage("--storage");
+        assertHelp(cliResult);
     }
 
     @Test
     @Launch({ Build.NAME, "--help" })
     void testBuildHelp(LaunchResult result) {
         CLIResult cliResult = (CLIResult) result;
-        cliResult.assertHelp();
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ Export.NAME, "--help" })
+    void testExportHelp(LaunchResult result) {
+        CLIResult cliResult = (CLIResult) result;
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ Export.NAME, "--help-all" })
+    void testExportHelpAll(LaunchResult result) {
+        CLIResult cliResult = (CLIResult) result;
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ Import.NAME, "--help" })
+    void testImportHelp(LaunchResult result) {
+        CLIResult cliResult = (CLIResult) result;
+        assertHelp(cliResult);
+    }
+
+    @Test
+    @Launch({ Import.NAME, "--help-all" })
+    void testImportHelpAll(LaunchResult result) {
+        CLIResult cliResult = (CLIResult) result;
+        assertHelp(cliResult);
     }
 
     @Test
@@ -128,5 +168,13 @@ public class HelpCommandDistTest {
 
     private void assertSingleJvmStarted(CLIResult run) {
         assertEquals(1, run.getOutputStream().stream().filter(s -> s.contains("Listening for transport dt_socket")).count());
+    }
+
+    private void assertHelp(CLIResult result) {
+        try (NamedEnvironment env = KcNamerFactory.asWindowsOsSpecificTest()) {
+            Approvals.verify(result.getOutput());
+        } catch (Exception cause) {
+            throw new RuntimeException("Failed to assert help", cause);
+        }
     }
 }

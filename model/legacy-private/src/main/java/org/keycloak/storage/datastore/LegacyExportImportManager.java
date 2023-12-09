@@ -21,6 +21,7 @@ import org.jboss.logging.Logger;
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.component.ComponentModel;
+import org.keycloak.deployment.DeployedConfigurationsManager;
 import org.keycloak.exportimport.ExportAdapter;
 import org.keycloak.exportimport.ExportOptions;
 import org.keycloak.exportimport.util.ExportUtils;
@@ -59,6 +60,7 @@ import org.keycloak.models.utils.DefaultKeyProviders;
 import org.keycloak.models.utils.DefaultRequiredActions;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.RepresentationToModel;
+import org.keycloak.partialimport.PartialImportResults;
 import org.keycloak.protocol.oidc.OIDCConfigAttributes;
 import org.keycloak.representations.idm.ApplicationRepresentation;
 import org.keycloak.representations.idm.AuthenticationExecutionExportRepresentation;
@@ -76,6 +78,7 @@ import org.keycloak.representations.idm.GroupRepresentation;
 import org.keycloak.representations.idm.IdentityProviderMapperRepresentation;
 import org.keycloak.representations.idm.IdentityProviderRepresentation;
 import org.keycloak.representations.idm.OAuthClientRepresentation;
+import org.keycloak.representations.idm.PartialImportRepresentation;
 import org.keycloak.representations.idm.ProtocolMapperRepresentation;
 import org.keycloak.representations.idm.RealmRepresentation;
 import org.keycloak.representations.idm.RequiredActionProviderRepresentation;
@@ -87,7 +90,8 @@ import org.keycloak.representations.idm.UserFederationMapperRepresentation;
 import org.keycloak.representations.idm.UserFederationProviderRepresentation;
 import org.keycloak.representations.idm.UserRepresentation;
 import org.keycloak.storage.ExportImportManager;
-import org.keycloak.storage.ImportRealmFromRepresentation;
+import org.keycloak.storage.ImportRealmFromRepresentationEvent;
+import org.keycloak.storage.PartialImportRealmFromRepresentationEvent;
 import org.keycloak.storage.UserStoragePrivateUtil;
 import org.keycloak.storage.UserStorageProvider;
 import org.keycloak.storage.UserStorageProviderModel;
@@ -97,7 +101,7 @@ import org.keycloak.userprofile.UserProfileProvider;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.validation.ValidationUtil;
 
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MediaType;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
@@ -111,6 +115,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.keycloak.models.utils.DefaultRequiredActions.getDefaultRequiredActionCaseInsensitively;
 import static org.keycloak.models.utils.RepresentationToModel.createCredentials;
 import static org.keycloak.models.utils.RepresentationToModel.createFederatedIdentities;
 import static org.keycloak.models.utils.RepresentationToModel.createGroups;
@@ -133,6 +138,7 @@ public class LegacyExportImportManager implements ExportImportManager {
         this.session = session;
     }
 
+    @Override
     public void exportRealm(RealmModel realm, ExportOptions options, ExportAdapter callback) {
         callback.setType(MediaType.APPLICATION_JSON);
         callback.writeToOutputStream(outputStream -> {
@@ -152,7 +158,7 @@ public class LegacyExportImportManager implements ExportImportManager {
             throw new ModelException("unable to read contents from stream", e);
         }
         logger.debugv("importRealm: {0}", rep.getRealm());
-        return ImportRealmFromRepresentation.fire(session, rep);
+        return ImportRealmFromRepresentationEvent.fire(session, rep);
     }
 
     @Override
@@ -254,8 +260,8 @@ public class LegacyExportImportManager implements ExportImportManager {
         // OAuth 2.0 Device Authorization Grant
         OAuth2DeviceConfig deviceConfig = newRealm.getOAuth2DeviceConfig();
 
-        deviceConfig.setOAuth2DeviceCodeLifespan(rep.getOAuth2DeviceCodeLifespan());
-        deviceConfig.setOAuth2DevicePollingInterval(rep.getOAuth2DevicePollingInterval());
+        deviceConfig.setOAuth2DeviceCodeLifespan(newRealm, rep.getOAuth2DeviceCodeLifespan());
+        deviceConfig.setOAuth2DevicePollingInterval(newRealm, rep.getOAuth2DevicePollingInterval());
 
         if (rep.getSslRequired() != null)
             newRealm.setSslRequired(SslRequired.valueOf(rep.getSslRequired().toUpperCase()));
@@ -272,6 +278,12 @@ public class LegacyExportImportManager implements ExportImportManager {
         if (rep.getAccountTheme() != null) newRealm.setAccountTheme(rep.getAccountTheme());
         if (rep.getAdminTheme() != null) newRealm.setAdminTheme(rep.getAdminTheme());
         if (rep.getEmailTheme() != null) newRealm.setEmailTheme(rep.getEmailTheme());
+        if (rep.getLocalizationTexts() != null) {
+            Map<String, Map<String, String>> localizationTexts = rep.getLocalizationTexts();
+            for (Map.Entry<String, Map<String, String>> entry: localizationTexts.entrySet()) {
+                newRealm.createOrUpdateRealmLocalizationTexts(entry.getKey(), entry.getValue());
+            }
+        }
 
         // todo remove this stuff as its all deprecated
         if (rep.getRequiredCredentials() != null) {
@@ -297,7 +309,7 @@ public class LegacyExportImportManager implements ExportImportManager {
 
         updateParSettings(rep, newRealm);
 
-        Map<String, String> mappedFlows = importAuthenticationFlows(newRealm, rep);
+        Map<String, String> mappedFlows = importAuthenticationFlows(session, newRealm, rep);
         if (rep.getRequiredActions() != null) {
             for (RequiredActionProviderRepresentation action : rep.getRequiredActions()) {
                 RequiredActionProviderModel model = toModel(action);
@@ -398,11 +410,7 @@ public class LegacyExportImportManager implements ExportImportManager {
         if (rep.getGroups() != null) {
             importGroups(newRealm, rep);
             if (rep.getDefaultGroups() != null) {
-                for (String path : rep.getDefaultGroups()) {
-                    GroupModel found = KeycloakModelUtils.findGroupByPath(newRealm, path);
-                    if (found == null) throw new RuntimeException("default group in realm rep doesn't exist: " + path);
-                    newRealm.addDefaultGroup(found);
-                }
+                KeycloakModelUtils.setDefaultGroups(session, newRealm, rep.getDefaultGroups().stream());
             }
         }
 
@@ -450,6 +458,17 @@ public class LegacyExportImportManager implements ExportImportManager {
                 DefaultKeyProviders.createProviders(newRealm);
             }
         }
+    }
+
+    @Override
+    public PartialImportResults partialImportRealm(RealmModel realm, InputStream requestBody) {
+        PartialImportRepresentation rep;
+        try {
+            rep = JsonSerialization.readValue(requestBody, PartialImportRepresentation.class);
+        } catch (IOException e) {
+            throw new ModelException("unable to read contents from stream", e);
+        }
+        return PartialImportRealmFromRepresentationEvent.fire(session, rep, realm);
     }
 
     private static RoleModel getOrAddRealmRole(RealmModel realm, String name) {
@@ -663,6 +682,18 @@ public class LegacyExportImportManager implements ExportImportManager {
             }
             accountClient.setRedirectUris(accountRedirectUris);
         }
+
+        ClientModel accountConsoleClient = realm.getClientByClientId(Constants.ACCOUNT_CONSOLE_CLIENT_ID);
+        if (accountConsoleClient != null) {
+            if (accountConsoleClient.getBaseUrl() != null) {
+                accountConsoleClient.setBaseUrl(accountConsoleClient.getBaseUrl().replace("/realms/" + oldName + "/", "/realms/" + name + "/"));
+            }
+            Set<String> accountConsoleRedirectUris = new HashSet<>();
+            for (String r : accountConsoleClient.getRedirectUris()) {
+                accountConsoleRedirectUris.add(replace(r, "/realms/" + oldName + "/", "/realms/" + name + "/"));
+            }
+            accountConsoleClient.setRedirectUris(accountConsoleRedirectUris);
+        }
     }
 
     private static String replace(String url, String target, String replacement) {
@@ -673,11 +704,6 @@ public class LegacyExportImportManager implements ExportImportManager {
     public void updateRealm(RealmRepresentation rep, RealmModel realm) {
         if (rep.getRealm() != null) {
             renameRealm(realm, rep.getRealm());
-        }
-
-        if (!Boolean.parseBoolean(rep.getAttributesOrEmpty().get("userProfileEnabled"))) {
-            UserProfileProvider provider = session.getProvider(UserProfileProvider.class);
-            provider.setConfiguration(null);
         }
 
         // Import attributes first, so the stuff saved directly on representation (displayName, bruteForce etc) has bigger priority
@@ -694,6 +720,9 @@ public class LegacyExportImportManager implements ExportImportManager {
             }
         }
 
+        if (rep.getDefaultGroups() != null) {
+            KeycloakModelUtils.setDefaultGroups(session, realm, rep.getDefaultGroups().stream());
+        }
         if (rep.getDisplayName() != null) realm.setDisplayName(rep.getDisplayName());
         if (rep.getDisplayNameHtml() != null) realm.setDisplayNameHtml(rep.getDisplayNameHtml());
         if (rep.isEnabled() != null) realm.setEnabled(rep.isEnabled());
@@ -730,8 +759,8 @@ public class LegacyExportImportManager implements ExportImportManager {
 
         OAuth2DeviceConfig deviceConfig = realm.getOAuth2DeviceConfig();
 
-        deviceConfig.setOAuth2DeviceCodeLifespan(rep.getOAuth2DeviceCodeLifespan());
-        deviceConfig.setOAuth2DevicePollingInterval(rep.getOAuth2DevicePollingInterval());
+        deviceConfig.setOAuth2DeviceCodeLifespan(realm, rep.getOAuth2DeviceCodeLifespan());
+        deviceConfig.setOAuth2DevicePollingInterval(realm, rep.getOAuth2DevicePollingInterval());
 
         if (rep.getNotBefore() != null) realm.setNotBefore(rep.getNotBefore());
         if (rep.getDefaultSignatureAlgorithm() != null) realm.setDefaultSignatureAlgorithm(rep.getDefaultSignatureAlgorithm());
@@ -855,11 +884,7 @@ public class LegacyExportImportManager implements ExportImportManager {
         }
         if (userRep.getRequiredActions() != null) {
             for (String requiredAction : userRep.getRequiredActions()) {
-                try {
-                    user.addRequiredAction(UserModel.RequiredAction.valueOf(requiredAction.toUpperCase()));
-                } catch (IllegalArgumentException iae) {
-                    user.addRequiredAction(requiredAction);
-                }
+                user.addRequiredAction(getDefaultRequiredActionCaseInsensitively(requiredAction));
             }
         }
         createCredentials(userRep, session, newRealm, user, false);
@@ -884,7 +909,7 @@ public class LegacyExportImportManager implements ExportImportManager {
             }
             user.setServiceAccountClientLink(client.getId());
         }
-        createGroups(userRep, newRealm, user);
+        createGroups(session, userRep, newRealm, user);
         return user;
     }
 
@@ -1186,6 +1211,9 @@ public class LegacyExportImportManager implements ExportImportManager {
         List<String> webAuthnPolicyAcceptableAaguids = rep.getWebAuthnPolicyAcceptableAaguids();
         if (webAuthnPolicyAcceptableAaguids != null) webAuthnPolicy.setAcceptableAaguids(webAuthnPolicyAcceptableAaguids);
 
+        List<String> webAuthnPolicyExtraOrigins = rep.getWebAuthnPolicyExtraOrigins();
+        if (webAuthnPolicyExtraOrigins != null) webAuthnPolicy.setExtraOrigins(webAuthnPolicyExtraOrigins);
+
         return webAuthnPolicy;
     }
 
@@ -1238,9 +1266,12 @@ public class LegacyExportImportManager implements ExportImportManager {
         List<String> webAuthnPolicyAcceptableAaguids = rep.getWebAuthnPolicyPasswordlessAcceptableAaguids();
         if (webAuthnPolicyAcceptableAaguids != null) webAuthnPolicy.setAcceptableAaguids(webAuthnPolicyAcceptableAaguids);
 
+        List<String> webAuthnPolicyExtraOrigins = rep.getWebAuthnPolicyPasswordlessExtraOrigins();
+        if (webAuthnPolicyExtraOrigins != null) webAuthnPolicy.setExtraOrigins(webAuthnPolicyExtraOrigins);
+
         return webAuthnPolicy;
     }
-    public static Map<String, String> importAuthenticationFlows(RealmModel newRealm, RealmRepresentation rep) {
+    public static Map<String, String> importAuthenticationFlows(KeycloakSession session, RealmModel newRealm, RealmRepresentation rep) {
         Map<String, String> mappedFlows = new HashMap<>();
         if (rep.getAuthenticationFlows() == null) {
             // assume this is an old version being imported
@@ -1260,9 +1291,7 @@ public class LegacyExportImportManager implements ExportImportManager {
             if (rep.getAuthenticationFlows() != null) {
                 for (AuthenticationFlowRepresentation flowRep : rep.getAuthenticationFlows()) {
                     AuthenticationFlowModel model = RepresentationToModel.toModel(flowRep);
-                    // make sure new id is generated for new AuthenticationFlowModel instance
                     String previousId = model.getId();
-                    model.setId(null);
                     model = newRealm.addAuthenticationFlow(model);
                     // store the mapped ids so that clients can reference the correct flow when importing the authenticationFlowBindingOverrides
                     mappedFlows.put(previousId, model.getId());
@@ -1270,7 +1299,7 @@ public class LegacyExportImportManager implements ExportImportManager {
                 for (AuthenticationFlowRepresentation flowRep : rep.getAuthenticationFlows()) {
                     AuthenticationFlowModel model = newRealm.getFlowByAlias(flowRep.getAlias());
                     for (AuthenticationExecutionExportRepresentation exeRep : flowRep.getAuthenticationExecutions()) {
-                        AuthenticationExecutionModel execution = toModel(newRealm, model, exeRep);
+                        AuthenticationExecutionModel execution = toModel(session, newRealm, model, exeRep);
                         newRealm.addAuthenticatorExecution(execution);
                     }
                 }
@@ -1356,10 +1385,10 @@ public class LegacyExportImportManager implements ExportImportManager {
         return mappedFlows;
     }
 
-    private static AuthenticationExecutionModel toModel(RealmModel realm, AuthenticationFlowModel parentFlow, AuthenticationExecutionExportRepresentation rep) {
+    private static AuthenticationExecutionModel toModel(KeycloakSession session, RealmModel realm, AuthenticationFlowModel parentFlow, AuthenticationExecutionExportRepresentation rep) {
         AuthenticationExecutionModel model = new AuthenticationExecutionModel();
         if (rep.getAuthenticatorConfig() != null) {
-            AuthenticatorConfigModel config = realm.getAuthenticatorConfigByAlias(rep.getAuthenticatorConfig());
+            AuthenticatorConfigModel config = new DeployedConfigurationsManager(session).getAuthenticatorConfigByAlias(realm, rep.getAuthenticatorConfig());
             model.setAuthenticatorConfig(config.getId());
         }
         model.setAuthenticator(rep.getAuthenticator());
@@ -1417,9 +1446,9 @@ public class LegacyExportImportManager implements ExportImportManager {
         model.setPriority(rep.getPriority());
         model.setDefaultAction(rep.isDefaultAction());
         model.setEnabled(rep.isEnabled());
-        model.setProviderId(rep.getProviderId());
+        model.setProviderId(getDefaultRequiredActionCaseInsensitively(rep.getProviderId()));
         model.setName(rep.getName());
-        model.setAlias(rep.getAlias());
+        model.setAlias(getDefaultRequiredActionCaseInsensitively(rep.getAlias()));
         return model;
     }
 
@@ -1458,7 +1487,7 @@ public class LegacyExportImportManager implements ExportImportManager {
 
         if (userRep.getGroups() != null) {
             for (String path : userRep.getGroups()) {
-                GroupModel group = KeycloakModelUtils.findGroupByPath(newRealm, path);
+                GroupModel group = KeycloakModelUtils.findGroupByPath(session, newRealm, path);
                 if (group == null) {
                     throw new RuntimeException("Unable to find group specified by path: " + path);
 

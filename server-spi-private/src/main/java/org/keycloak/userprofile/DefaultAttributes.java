@@ -29,11 +29,13 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-
+import org.jboss.logging.Logger;
+import org.keycloak.common.util.CollectionUtil;
 import org.keycloak.models.Constants;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.validate.ValidationContext;
 import org.keycloak.validate.ValidationError;
 
@@ -51,6 +53,8 @@ import org.keycloak.validate.ValidationError;
  */
 public class DefaultAttributes extends HashMap<String, List<String>> implements Attributes {
 
+    private static Logger logger = Logger.getLogger(DefaultAttributes.class);
+
     /**
      * To reference dynamic attributes that can be configured as read-only when setting up the provider.
      * We should probably remove that once we remove the legacy provider, because this will come from the configuration.
@@ -58,7 +62,7 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
     public static final String READ_ONLY_ATTRIBUTE_KEY = "kc.read.only";
 
     protected final UserProfileContext context;
-    private final KeycloakSession session;
+    protected final KeycloakSession session;
     private final Map<String, AttributeMetadata> metadataByAttribute;
     protected final UserModel user;
 
@@ -74,6 +78,18 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
 
     @Override
     public boolean isReadOnly(String attributeName) {
+        if (UserModel.USERNAME.equals(attributeName)) {
+            if (isServiceAccountUser()) {
+                return true;
+            }
+        }
+
+        if (UserModel.EMAIL.equals(attributeName)) {
+            if (isServiceAccountUser()) {
+                return false;
+            }
+        }
+
         if (isReadOnlyFromMetadata(attributeName) || isReadOnlyInternalAttribute(attributeName)) {
             return true;
         }
@@ -130,6 +146,14 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
                     continue;
                 }
 
+                if (user != null && metadata.isReadOnly(attributeContext)
+                        && CollectionUtil.collectionEquals(user.getAttributeStream(name).collect(Collectors.toList()), attribute.getValue())) {
+                    // allow update if the value was already wrong in the user and is read-only in this context
+                    logger.warnf("User '%s' attribute '%s' has previous validation errors %s but is read-only in context %s.",
+                            user.getUsername(), name, vc.getErrors(), attributeContext.getContext());
+                    continue;
+                }
+
                 if (result == null) {
                     result = false;
                 }
@@ -163,8 +187,24 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
     }
 
     @Override
-    public Set<Entry<String, List<String>>> attributeSet() {
-        return entrySet();
+    public Map<String, List<String>> getWritable() {
+        Map<String, List<String>> attributes = new HashMap<>(this);
+
+        for (String name : nameSet()) {
+            AttributeMetadata metadata = getMetadata(name);
+            RealmModel realm = session.getContext().getRealm();
+
+            if (UserModel.USERNAME.equals(name)
+                    && realm.isRegistrationEmailAsUsername()) {
+                continue;
+            }
+
+            if (metadata == null || !metadata.canEdit(createAttributeContext(metadata))) {
+                attributes.remove(name);
+            }
+        }
+
+        return attributes;
     }
 
     @Override
@@ -198,12 +238,16 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
         return this;
     }
 
+    protected boolean isServiceAccountUser() {
+        return user != null && user.getServiceAccountClientLink() != null;
+    }
+
     private AttributeContext createAttributeContext(Entry<String, List<String>> attribute, AttributeMetadata metadata) {
-        return new AttributeContext(context, session, attribute, user, metadata);
+        return new AttributeContext(context, session, attribute, user, metadata, this);
     }
 
     private AttributeContext createAttributeContext(String attributeName, AttributeMetadata metadata) {
-        return new AttributeContext(context, session, createAttribute(attributeName), user, metadata);
+        return new AttributeContext(context, session, createAttribute(attributeName), user, metadata, this);
     }
 
     protected AttributeContext createAttributeContext(AttributeMetadata metadata) {
@@ -262,13 +306,17 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
                     key = key.substring(Constants.USER_ATTRIBUTES_PREFIX.length());
                 }
 
-                List<String> values;
                 Object value = entry.getValue();
+                List<String> values;
 
                 if (value instanceof String) {
                     values = Collections.singletonList((String) value);
                 } else {
                     values = (List<String>) value;
+                }
+
+                if (UserModel.USERNAME.equals(key) || UserModel.EMAIL.equals(key)) {
+                    values = values.stream().map(KeycloakModelUtils::toLowerCaseSafe).collect(Collectors.toList());
                 }
 
                 newAttributes.put(key, Collections.unmodifiableList(values));
@@ -292,25 +340,36 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
         }
 
         if (user != null) {
-            List<String> username = newAttributes.get(UserModel.USERNAME);
+            List<String> username = newAttributes.getOrDefault(UserModel.USERNAME, Collections.emptyList());
 
-            if (username == null || username.isEmpty() || (!realm.isEditUsernameAllowed() && UserProfileContext.USER_API.equals(context))) {
-                newAttributes.put(UserModel.USERNAME, Collections.singletonList(user.getUsername()));
+            if (username.isEmpty() && isReadOnly(UserModel.USERNAME)) {
+                setUserName(newAttributes, Collections.singletonList(user.getUsername()));
             }
         }
 
-        List<String> email = newAttributes.get(UserModel.EMAIL);
+        List<String> email = newAttributes.getOrDefault(UserModel.EMAIL, Collections.emptyList());
 
-        if (email != null && realm.isRegistrationEmailAsUsername()) {
-            final List<String> lowerCaseEmailList = email.stream()
+        if (!email.isEmpty() && realm.isRegistrationEmailAsUsername()) {
+            List<String> lowerCaseEmailList = email.stream()
                     .filter(Objects::nonNull)
-                    .map(String::toLowerCase)
                     .collect(Collectors.toList());
 
-            newAttributes.put(UserModel.USERNAME, lowerCaseEmailList);
+            setUserName(newAttributes, lowerCaseEmailList);
+
+            if (user != null && isReadOnly(UserModel.EMAIL)) {
+                newAttributes.put(UserModel.EMAIL, Collections.singletonList(user.getEmail()));
+                setUserName(newAttributes, Collections.singletonList(user.getEmail()));
+            }
         }
 
         return newAttributes;
+    }
+
+    private void setUserName(Map<String, List<String>> newAttributes, List<String> lowerCaseEmailList) {
+        if (isServiceAccountUser()) {
+            return;
+        }
+        newAttributes.put(UserModel.USERNAME, lowerCaseEmailList);
     }
 
     protected boolean isIncludeAttributeIfNotProvided(AttributeMetadata metadata) {
@@ -335,12 +394,11 @@ public class DefaultAttributes extends HashMap<String, List<String>> implements 
             return true;
         }
 
-        // expect any attribute if managing the user profile using REST
-        if (UserProfileContext.USER_API.equals(context) || UserProfileContext.ACCOUNT.equals(context)) {
+        if (isServiceAccountUser()) {
             return true;
         }
 
-        if (isReadOnly(name)) {
+        if (isReadOnlyInternalAttribute(name)) {
             return true;
         }
 

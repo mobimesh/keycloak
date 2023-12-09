@@ -12,13 +12,11 @@ import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import javax.ws.rs.GET;
-import javax.ws.rs.Path;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
-import javax.ws.rs.core.UriInfo;
-import org.jboss.logging.Logger;
+import jakarta.ws.rs.GET;
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.resteasy.annotations.cache.NoCache;
 import org.keycloak.authentication.requiredactions.DeleteAccount;
 import org.keycloak.common.Profile;
@@ -37,6 +35,7 @@ import org.keycloak.services.Urls;
 import org.keycloak.services.managers.AppAuthManager;
 import org.keycloak.services.managers.Auth;
 import org.keycloak.services.managers.AuthenticationManager;
+import org.keycloak.services.resource.AccountResourceProvider;
 import org.keycloak.services.resources.RealmsResource;
 import org.keycloak.services.util.ResolveRelative;
 import org.keycloak.services.validation.Validation;
@@ -47,18 +46,18 @@ import org.keycloak.theme.freemarker.FreeMarkerProvider;
 import org.keycloak.urls.UrlType;
 import org.keycloak.util.JsonSerialization;
 import org.keycloak.utils.MediaType;
-import org.keycloak.utils.StringUtil;
 
 /**
  * Created by st on 29/03/17.
  */
-public class AccountConsole {
-    private static final Logger logger = Logger.getLogger(AccountConsole.class);
-    
+public class AccountConsole implements AccountResourceProvider {
+
+    // Used when some other context (ie. IdentityBrokerService) wants to forward error to account management and display it here
+    public static final String ACCOUNT_MGMT_FORWARDED_ERROR_NOTE = "ACCOUNT_MGMT_FORWARDED_ERROR";
+
     private final Pattern bundleParamPattern = Pattern.compile("(\\{\\s*(\\d+)\\s*\\})");
 
-    @Context
-    protected KeycloakSession session;
+    protected final KeycloakSession session;
 
     private final AppAuthManager authManager;
     private final RealmModel realm;
@@ -67,11 +66,13 @@ public class AccountConsole {
 
     private Auth auth;
 
-    public AccountConsole(RealmModel realm, ClientModel client, Theme theme) {
-        this.realm = realm;
+    public AccountConsole(KeycloakSession session, ClientModel client, Theme theme) {
+        this.session = session;
+        this.realm = session.getContext().getRealm();
         this.client = client;
         this.theme = theme;
         this.authManager = new AppAuthManager();
+        init();
     }
 
     public void init() {
@@ -80,6 +81,14 @@ public class AccountConsole {
             auth = new Auth(realm, authResult.getToken(), authResult.getUser(), client, authResult.getSession(), true);
         }
     }
+
+    @Override
+    public Object getResource() {
+        return this;
+    }
+
+    @Override
+    public void close() {}
 
     @GET
     @NoCache
@@ -99,6 +108,7 @@ public class AccountConsole {
             map.put("authUrl", authUrl.getPath().endsWith("/") ? authUrl : authUrl + "/");
             map.put("baseUrl", accountBaseUrl);
             map.put("realm", realm);
+            map.put("clientId", Constants.ACCOUNT_CONSOLE_CLIENT_ID);
             map.put("resourceUrl", Urls.themeRoot(authUrl).getPath() + "/" + Constants.ACCOUNT_MANAGEMENT_CLIENT_ID + "/" + theme.getName());
             map.put("resourceCommonUrl", Urls.themeRoot(adminBaseUri).getPath() + "/common/keycloak");
             map.put("resourceVersion", Version.RESOURCES_VERSION);
@@ -114,11 +124,7 @@ public class AccountConsole {
             if (auth != null) user = auth.getUser();
             Locale locale = session.getContext().resolveLocale(user);
             map.put("locale", locale.toLanguageTag());
-            Properties messages = theme.getMessages(locale);
-            if(StringUtil.isNotBlank(realm.getDefaultLocale())) {
-                messages.putAll(realm.getRealmLocalizationTextsByLocale(realm.getDefaultLocale()));
-            }
-            messages.putAll(realm.getRealmLocalizationTextsByLocale(locale.toLanguageTag()));
+            Properties messages = theme.getEnhancedMessages(realm, locale);
             map.put("msg", new MessageFormatterMethod(locale, messages));
             map.put("msgJSON", messagesToJsonString(messages));
             map.put("supportedLocales", supportedLocales(messages));
@@ -132,22 +138,16 @@ public class AccountConsole {
                 }
             });
 
-            EventStoreProvider eventStore = session.getProvider(EventStoreProvider.class);
-            map.put("isEventsEnabled", eventStore != null && realm.isEventsEnabled());
             map.put("isAuthorizationEnabled", Profile.isFeatureEnabled(Profile.Feature.AUTHORIZATION));
             
-            boolean isTotpConfigured = false;
             boolean deleteAccountAllowed = false;
             boolean isViewGroupsEnabled= false;
             if (user != null) {
-                isTotpConfigured = user.credentialManager().isConfiguredFor(realm.getOTPPolicy().getType());
                 RoleModel deleteAccountRole = realm.getClientByClientId(Constants.ACCOUNT_MANAGEMENT_CLIENT_ID).getRole(AccountRoles.DELETE_ACCOUNT);
                 deleteAccountAllowed = deleteAccountRole != null && user.hasRole(deleteAccountRole) && realm.getRequiredActionProviderByAlias(DeleteAccount.PROVIDER_ID).isEnabled();
                 RoleModel viewGrouRole = realm.getClientByClientId(Constants.ACCOUNT_MANAGEMENT_CLIENT_ID).getRole(AccountRoles.VIEW_GROUPS);
                 isViewGroupsEnabled = viewGrouRole != null && user.hasRole(viewGrouRole);
             }
-
-            map.put("isTotpConfigured", isTotpConfigured);
 
             map.put("deleteAccountAllowed", deleteAccountAllowed);
 
@@ -212,7 +212,7 @@ public class AccountConsole {
         return Response.status(302).location(session.getContext().getUri().getRequestUriBuilder().path("../").build()).build();
     }
 
-    // TODO: took this code from elsewhere - refactor
+
     private String[] getReferrer() {
         String referrer = session.getContext().getUri().getQueryParameters().getFirst("referrer");
         if (referrer == null) {
@@ -226,7 +226,7 @@ public class AccountConsole {
             if (referrerUri != null) {
                 referrerUri = RedirectUtils.verifyRedirectUri(session, referrerUri, referrerClient);
             } else {
-                referrerUri = ResolveRelative.resolveRelativeUri(session, client.getRootUrl(), referrerClient.getBaseUrl());
+                referrerUri = ResolveRelative.resolveRelativeUri(session, referrerClient.getRootUrl(), referrerClient.getBaseUrl());
             }
             
             if (referrerUri != null) {
@@ -235,15 +235,6 @@ public class AccountConsole {
                     referrerName = referrer;
                 }
                 return new String[]{referrer, referrerName, referrerUri};
-            }
-        } else if (referrerUri != null) {
-            referrerClient = realm.getClientByClientId(referrer);
-            if (client != null) {
-                referrerUri = RedirectUtils.verifyRedirectUri(session, referrerUri, referrerClient);
-
-                if (referrerUri != null) {
-                    return new String[]{referrer, referrer, referrerUri};
-                }
             }
         }
 

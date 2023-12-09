@@ -21,7 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.core.Response;
 
 import org.keycloak.OAuthErrorException;
 import org.keycloak.common.ClientConnection;
@@ -70,7 +70,7 @@ public abstract class AbstractParEndpoint {
 
             cors.allowedOrigins(session, client);
 
-            if (client == null || client.isPublicClient()) {
+            if (client == null) {
                 throw throwErrorResponseException(OAuthErrorException.INVALID_REQUEST, "Client not allowed.", Response.Status.FORBIDDEN);
             }
         } catch (Exception e) {

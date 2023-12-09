@@ -17,7 +17,10 @@
 
 package org.keycloak.storage.ldap.idm.store;
 
+import java.util.List;
 import java.util.Set;
+import javax.naming.AuthenticationException;
+import javax.naming.ldap.LdapName;
 import org.keycloak.models.ModelException;
 import org.keycloak.models.UserModel;
 import org.keycloak.storage.ldap.LDAPConfig;
@@ -25,9 +28,6 @@ import org.keycloak.storage.ldap.idm.model.LDAPObject;
 import org.keycloak.representations.idm.LDAPCapabilityRepresentation;
 import org.keycloak.storage.ldap.idm.query.internal.LDAPQuery;
 import org.keycloak.storage.ldap.mappers.LDAPOperationDecorator;
-
-import javax.naming.AuthenticationException;
-import java.util.List;
 
 /**
  * IdentityStore representation providing minimal SPI
@@ -75,7 +75,7 @@ public interface IdentityStore {
      * @param memberAttrName The member attribute name
      * @param value The value (it can be uid or dn depending the group type)
      */
-    public void addMemberToGroup(String groupDn, String memberAttrName, String value);
+    public void addMemberToGroup(LdapName groupDn, String memberAttrName, String value);
 
     /**
      * Removes a member from a group.
@@ -83,7 +83,7 @@ public interface IdentityStore {
      * @param memberAttrName The member attribute name
      * @param value The value (it can be uid or dn depending the group type)
      */
-    public void removeMemberFromGroup(String groupDn, String memberAttrName, String value);
+    public void removeMemberFromGroup(LdapName groupDn, String memberAttrName, String value);
 
     // Identity query
 

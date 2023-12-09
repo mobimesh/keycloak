@@ -6,6 +6,7 @@
 ###################
 .idea
 *.iml
+!.idea/icon.png
 
 # Eclipse #
 ###########
@@ -78,8 +79,22 @@ quarkus/data/*.db
 
 # Jakarta transformed sources #
 ###############################
-/integration/admin-client-jakarta/src/
+/integration/admin-client/src/
+/adapters/saml/jakarta-servlet-filter/src/
+/adapters/oidc/jakarta-servlet-filter/src/
+/adapters/saml/wildfly-elytron-jakarta/src/
+/adapters/saml/core-jakarta/src/
+/adapters/saml/wildfly/wildfly-jakarta-subsystem/src/
 /.metadata/
 
 # Git ephemeral files
 *.versionsBackup
+
+# Node.js for frontend-maven-plugin #
+node
+
+# NPM
+node_modules
+
+# SDKMAM environment file
+.sdkmanrc

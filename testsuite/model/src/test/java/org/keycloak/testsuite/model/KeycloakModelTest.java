@@ -24,6 +24,8 @@ import org.keycloak.authorization.policy.provider.PolicyProviderFactory;
 import org.keycloak.authorization.policy.provider.PolicySpi;
 import org.keycloak.authorization.store.StoreFactorySpi;
 import org.keycloak.cluster.ClusterSpi;
+import org.keycloak.common.Profile;
+import org.keycloak.common.profile.PropertiesProfileConfigResolver;
 import org.keycloak.common.util.Time;
 import org.keycloak.component.ComponentFactoryProviderFactory;
 import org.keycloak.component.ComponentFactorySpi;
@@ -43,6 +45,7 @@ import org.keycloak.models.DeploymentStateSpi;
 import org.keycloak.models.UserLoginFailureSpi;
 import org.keycloak.models.UserSessionSpi;
 import org.keycloak.models.UserSpi;
+import org.keycloak.models.locking.GlobalLockProviderSpi;
 import org.keycloak.models.utils.KeycloakModelUtils;
 import org.keycloak.models.utils.PostMigrationEvent;
 import org.keycloak.provider.Provider;
@@ -77,7 +80,6 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -99,7 +101,6 @@ import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 import org.keycloak.models.DeploymentStateProviderFactory;
-import org.keycloak.models.dblock.DBLockSpi;
 
 /**
  * Base of testcases that operate on session level. The tests derived from this class
@@ -115,7 +116,6 @@ import org.keycloak.models.dblock.DBLockSpi;
  * @author hmlnarik
  */
 public abstract class KeycloakModelTest {
-
     private static final Logger LOG = Logger.getLogger(KeycloakModelParameters.class);
     private static final AtomicInteger FACTORY_COUNT = new AtomicInteger();
     protected final Logger log = Logger.getLogger(getClass());
@@ -132,9 +132,7 @@ public abstract class KeycloakModelTest {
                 testClass = testClass.getSuperclass();
             }
             List<Class<? extends Provider>> notFound = st
-              .filter(rp -> rp.only().length == 0 
-                ? getFactory().getProviderFactory(rp.value()) == null
-                : Stream.of(rp.only()).allMatch(provider -> getFactory().getProviderFactory(rp.value(), provider) == null))
+              .filter(KeycloakModelTest::checkProviderAvailability)
               .map(RequireProvider::value)
               .collect(Collectors.toList());
             Assume.assumeThat("Some required providers not found", notFound, Matchers.empty());
@@ -146,6 +144,25 @@ public abstract class KeycloakModelTest {
             return res;
         }
     };
+
+    // Returns true if annotation requirement is not met
+    private static boolean checkProviderAvailability(RequireProvider annotation) {
+        Set<String> allFactories = getFactory().getProviderFactoriesStream(annotation.value()).map(ProviderFactory::getId).collect(Collectors.toSet());
+        List<String> only = Arrays.asList(annotation.only());
+        List<String> exclude = Arrays.asList(annotation.exclude());
+
+        // There is no factory for required provider
+        if (allFactories.isEmpty()) return true;
+
+        // Remove excluded ids
+        allFactories.removeIf(exclude::contains);
+
+        // Remove not matching only
+        allFactories.removeIf(id -> !only.isEmpty() && !only.contains(id));
+
+        // If there is no factory return true
+        return allFactories.isEmpty();
+    }
 
     @Rule
     public final TestRule guaranteeRequiredFactoryOnMethod = new TestRule() {
@@ -216,7 +233,7 @@ public abstract class KeycloakModelTest {
       .add(ClientSpi.class)
       .add(ComponentFactorySpi.class)
       .add(ClusterSpi.class)
-      .add(DBLockSpi.class)
+      .add(GlobalLockProviderSpi.class)
       .add(EventStoreSpi.class)
       .add(ExecutorsSpi.class)
       .add(GroupSpi.class)
@@ -254,9 +271,9 @@ public abstract class KeycloakModelTest {
           Stream.of(basicParameters),
           Stream.of(System.getProperty("keycloak.model.parameters", "").split("\\s*,\\s*"))
             .filter(s -> s != null && ! s.trim().isEmpty())
-            .map(cn -> { try { return Class.forName(cn.indexOf('.') >= 0 ? cn : ("org.keycloak.testsuite.model.parameters." + cn)); } catch (Exception e) { LOG.error("Cannot find " + cn); return null; }})
+            .map(cn -> { try { return Class.forName(cn.indexOf('.') >= 0 ? cn : ("org.keycloak.testsuite.model.parameters." + cn)); } catch (Exception e) { throw new RuntimeException("Cannot find class " + cn, e); }})
             .filter(Objects::nonNull)
-            .map(c -> { try { return c.getDeclaredConstructor().newInstance(); } catch (Exception e) { LOG.error("Cannot instantiate " + c); return null; }} )
+            .map(c -> { try { return c.getDeclaredConstructor().newInstance(); } catch (Exception e) { throw new RuntimeException("Cannot instantiate class " + c, e); }} )
             .filter(KeycloakModelParameters.class::isInstance)
             .map(KeycloakModelParameters.class::cast)
           )
@@ -290,6 +307,13 @@ public abstract class KeycloakModelTest {
         LOG.debugf("Creating factory %d in %s using the following configuration:\n    %s", factoryIndex, threadName, CONFIG);
 
         DefaultKeycloakSessionFactory res = new DefaultKeycloakSessionFactory() {
+
+            @Override
+            public void init() {
+                Profile.configure(new PropertiesProfileConfigResolver(System.getProperties()));
+                super.init();
+            }
+
             @Override
             protected boolean isEnabled(ProviderFactory factory, Scope scope) {
                 return super.isEnabled(factory, scope) && isFactoryAllowed(factory);
@@ -314,9 +338,14 @@ public abstract class KeycloakModelTest {
                 return "KeycloakSessionFactory " + factoryIndex + " (from " + threadName + " thread)";
             }
         };
-        res.init();
-        res.publish(new PostMigrationEvent(res));
-        return res;
+        try {
+            res.init();
+            res.publish(new PostMigrationEvent(res));
+            return res;
+        } catch (RuntimeException ex) {
+            res.close();
+            throw ex;
+        }
     }
 
     /**
@@ -499,17 +528,17 @@ public abstract class KeycloakModelTest {
 
     @Before
     public final void createEnvironment() {
-        Time.setOffset(0);
+        setTimeOffset(0);
         USE_DEFAULT_FACTORY = isUseSameKeycloakSessionFactoryForAllThreads();
         KeycloakModelUtils.runJobInTransaction(getFactory(), this::createEnvironment);
     }
 
     @After
     public final void cleanEnvironment() {
-        Time.setOffset(0);
         if (getFactory() == null) {
             reinitializeKeycloakSessionFactory();
         }
+        setTimeOffset(0);
         KeycloakModelUtils.runJobInTransaction(getFactory(), this::cleanEnvironment);
     }
 
@@ -518,12 +547,13 @@ public abstract class KeycloakModelTest {
     }
 
     protected <T> void inRolledBackTransaction(T parameter, BiConsumer<KeycloakSession, T> what) {
-        KeycloakSession session = getFactory().create();
-        session.getTransactionManager().begin();
+        try (KeycloakSession session = getFactory().create()) {
+            session.getTransactionManager().begin();
 
-        what.accept(session, parameter);
+            what.accept(session, parameter);
 
-        session.getTransactionManager().rollback();
+            session.getTransactionManager().setRollbackOnly();
+        }
     }
 
     protected <T, R> R inComittedTransaction(T parameter, BiFunction<KeycloakSession, T, R> what) {
@@ -539,8 +569,7 @@ public abstract class KeycloakModelTest {
     }
 
     protected <T, R> R inComittedTransaction(T parameter, BiFunction<KeycloakSession, T, R> what, BiConsumer<KeycloakSession, T> onCommit, BiConsumer<KeycloakSession, T> onRollback) {
-        AtomicReference<R> res = new AtomicReference<>();
-        KeycloakModelUtils.runJobInTransaction(getFactory(), session -> {
+        return KeycloakModelUtils.runJobInTransactionWithResult(getFactory(), session -> {
             session.getTransactionManager().enlistAfterCompletion(new AbstractKeycloakTransaction() {
                 @Override
                 protected void commitImpl() {
@@ -552,9 +581,8 @@ public abstract class KeycloakModelTest {
                     if (onRollback != null) { onRollback.accept(session, parameter); }
                 }
             });
-            res.set(what.apply(session, parameter));
+            return what.apply(session, parameter);
         });
-        return res.get();
     }
 
     /**
@@ -583,4 +611,23 @@ public abstract class KeycloakModelTest {
         }
     }
 
+    protected static RealmModel createRealm(KeycloakSession s, String name) {
+        RealmModel realm = s.realms().getRealmByName(name);
+        if (realm != null) {
+            // The previous test didn't clean up the realm for some reason, cleanup now
+            s.realms().removeRealm(realm.getId());
+        }
+        realm = s.realms().createRealm(name);
+        return realm;
+    }
+
+    /**
+     * Moves time on the Keycloak server
+     * @param seconds time offset in seconds by which Keycloak server time is moved
+     */
+    protected void setTimeOffset(int seconds) {
+        inComittedTransaction(session -> {
+            Time.setOffset(seconds);
+        });
+    }
 }

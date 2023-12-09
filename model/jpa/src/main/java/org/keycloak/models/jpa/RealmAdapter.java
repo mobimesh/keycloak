@@ -19,6 +19,9 @@ package org.keycloak.models.jpa;
 
 import org.keycloak.Config;
 import org.jboss.logging.Logger;
+import org.keycloak.broker.provider.IdentityProvider;
+import org.keycloak.broker.provider.IdentityProviderFactory;
+import org.keycloak.broker.social.SocialIdentityProvider;
 import org.keycloak.common.enums.SslRequired;
 import org.keycloak.common.util.MultivaluedHashMap;
 import org.keycloak.common.util.Time;
@@ -29,10 +32,21 @@ import org.keycloak.models.jpa.entities.*;
 import org.keycloak.models.utils.ComponentUtil;
 import org.keycloak.models.utils.KeycloakModelUtils;
 
-import javax.persistence.EntityManager;
-import javax.persistence.LockModeType;
-import javax.persistence.TypedQuery;
-import java.util.*;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.LockModeType;
+import jakarta.persistence.TypedQuery;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import java.util.Collections;
+import java.util.Collection;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Arrays;
+import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
@@ -686,38 +700,6 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
     }
 
     @Override
-    @Deprecated
-    public Stream<String> getDefaultRolesStream() {
-        return getDefaultRole().getCompositesStream().filter(this::isRealmRole).map(RoleModel::getName);
-    }
-
-    private boolean isRealmRole(RoleModel role) {
-        return ! role.isClientRole();
-    }
-
-    @Override
-    @Deprecated
-    public void addDefaultRole(String name) {
-        getDefaultRole().addCompositeRole(getOrAddRoleId(name));
-    }
-
-    private RoleModel getOrAddRoleId(String name) {
-        RoleModel role = getRole(name);
-        if (role == null) {
-            role = addRole(name);
-        }
-        return role;
-    }
-
-    @Override
-    @Deprecated
-    public void removeDefaultRoles(String... defaultRoles) {
-        for (String defaultRole : defaultRoles) {
-            getDefaultRole().removeCompositeRole(getRole(defaultRole));
-        }
-    }
-
-    @Override
     public Stream<GroupModel> getDefaultGroupsStream() {
         return realm.getDefaultGroupIds().stream().map(this::getGroupById);
     }
@@ -791,6 +773,11 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
     @Override
     public Stream<ClientModel> searchClientByAttributes(Map<String, String> attributes, Integer firstResult, Integer maxResults) {
         return session.clients().searchClientsByAttributes(this, attributes, firstResult, maxResults);
+    }
+
+    @Override
+    public Stream<ClientModel> searchClientByAuthenticationFlowBindingOverrides(Map<String, String> overrides, Integer firstResult, Integer maxResults) {
+        return session.clients().searchClientsByAuthenticationFlowBindingOverrides(this, overrides, firstResult, maxResults);
     }
 
     private static final String BROWSER_HEADER_PREFIX = "_browser_header.";
@@ -990,6 +977,12 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
             acceptableAaguids = Arrays.asList(acceptableAaguidsString.split(","));
         policy.setAcceptableAaguids(acceptableAaguids);
 
+        String extraOriginsString = getAttribute(RealmAttributes.WEBAUTHN_POLICY_EXTRA_ORIGINS + attributePrefix);
+        List<String> extraOrigins = new ArrayList<>();
+        if (extraOriginsString != null && !extraOriginsString.isEmpty())
+            extraOrigins = Arrays.asList(extraOriginsString.split(","));
+        policy.setExtraOrigins(extraOrigins);
+
         return policy;
     }
 
@@ -1032,6 +1025,14 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
             setAttribute(RealmAttributes.WEBAUTHN_POLICY_ACCEPTABLE_AAGUIDS + attributePrefix, acceptableAaguidsString);
         } else {
             removeAttribute(RealmAttributes.WEBAUTHN_POLICY_ACCEPTABLE_AAGUIDS + attributePrefix);
+        }
+
+        List<String> extraOrigins = policy.getExtraOrigins();
+        if (extraOrigins != null && !extraOrigins.isEmpty()) {
+            String extraOriginsString = String.join(",", extraOrigins);
+            setAttribute(RealmAttributes.WEBAUTHN_POLICY_EXTRA_ORIGINS + attributePrefix, extraOriginsString);
+        } else {
+            removeAttribute(RealmAttributes.WEBAUTHN_POLICY_EXTRA_ORIGINS + attributePrefix);
         }
     }
 
@@ -1197,7 +1198,7 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
     }
 
     private IdentityProviderModel entityToModel(IdentityProviderEntity entity) {
-        IdentityProviderModel identityProviderModel = new IdentityProviderModel();
+        IdentityProviderModel identityProviderModel = getModelFromProviderFactory(entity.getProviderId());
         identityProviderModel.setProviderId(entity.getProviderId());
         identityProviderModel.setAlias(entity.getAlias());
         identityProviderModel.setDisplayName(entity.getDisplayName());
@@ -1216,6 +1217,21 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
         identityProviderModel.setStoreToken(entity.isStoreToken());
         identityProviderModel.setAddReadTokenRoleOnCreate(entity.isAddReadTokenRoleOnCreate());
         return identityProviderModel;
+    }
+
+    private IdentityProviderModel getModelFromProviderFactory(String providerId) {
+        Optional<IdentityProviderFactory> factory = Stream.concat(session.getKeycloakSessionFactory().getProviderFactoriesStream(IdentityProvider.class),
+                                                                  session.getKeycloakSessionFactory().getProviderFactoriesStream(SocialIdentityProvider.class))
+                                                          .filter(providerFactory -> Objects.equals(providerFactory.getId(), providerId))
+                                                          .map(IdentityProviderFactory.class::cast)
+                                                          .findFirst();
+
+        if (factory.isPresent()) {
+            return factory.get().createConfig();
+        } else {
+            logger.warn("Couldn't find a suitable identity provider factory for " + providerId);
+            return new IdentityProviderModel();
+        }
     }
 
     @Override
@@ -1938,12 +1954,6 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
     }
 
     @Override
-    @Deprecated
-    public Stream<GroupModel> searchForGroupByNameStream(String search, Integer first, Integer max) {
-        return session.groups().searchForGroupByNameStream(this, search, false, first, max);
-    }
-
-    @Override
     public boolean removeGroup(GroupModel group) {
         return session.groups().removeGroup(this, group);
     }
@@ -2191,7 +2201,7 @@ public class RealmAdapter implements LegacyRealmModel, JpaModel<RealmEntity> {
         }
         else {
             RealmLocalizationTextsEntity realmLocalizationTextsEntity = new RealmLocalizationTextsEntity();
-            realmLocalizationTextsEntity.setRealmId(realm.getId());
+            realmLocalizationTextsEntity.setRealm(realm);
             realmLocalizationTextsEntity.setLocale(locale);
             realmLocalizationTextsEntity.setTexts(localizationTexts);
 

@@ -16,10 +16,11 @@ Options:
 
 Cache:
 
---cache <type>       Defines the cache mechanism for high-availability. By default, a 'ispn' cache
-                       is used to create a cluster between multiple server nodes. A 'local' cache
-                       disables clustering and is intended for development and testing purposes.
-                       Possible values are: ispn, local. Default: ispn.
+--cache <type>       Defines the cache mechanism for high-availability. By default in production
+                       mode, a 'ispn' cache is used to create a cluster between multiple server
+                       nodes. By default in development mode, a 'local' cache disables clustering
+                       and is intended for development and testing purposes. Possible values are:
+                       ispn, local. Default: ispn.
 --cache-config-file <file>
                      Defines the file from which cache configuration should be loaded from. The
                        configuration file is relative to the 'conf/' directory.
@@ -32,6 +33,8 @@ Database:
 
 --db <vendor>        The database vendor. Possible values are: dev-file, dev-mem, mariadb, mssql,
                        mysql, oracle, postgres. Default: dev-file.
+--db-driver <driver> The fully qualified class name of the JDBC driver. If not set, a default
+                       driver is set accordingly to the chosen database.
 --db-password <password>
                      The password of the database user.
 --db-pool-initial-size <size>
@@ -66,19 +69,21 @@ Transaction:
 
 Feature:
 
---features <feature> Enables a set of one or more features. Possible values are: authorization,
-                       account2, account-api, admin-fine-grained-authz, admin2, docker,
-                       impersonation, openshift-integration, scripts, token-exchange, web-authn,
-                       client-policies, ciba, map-storage, par, declarative-user-profile,
-                       dynamic-scopes, client-secret-rotation, step-up-authentication,
-                       recovery-codes, update-email, js-adapter, preview.
+--features <feature> Enables a set of one or more features. Possible values are: account-api,
+                       account2, account3, admin-api, admin-fine-grained-authz, admin2,
+                       authorization, ciba, client-policies, client-secret-rotation,
+                       declarative-user-profile, device-flow, docker, dpop, dynamic-scopes, fips,
+                       impersonation, js-adapter, kerberos, linkedin-oauth, map-storage, par,
+                       preview, recovery-codes, scripts, step-up-authentication, token-exchange,
+                       transient-users, update-email, web-authn.
 --features-disabled <feature>
-                     Disables a set of one or more features. Possible values are: authorization,
-                       account2, account-api, admin-fine-grained-authz, admin2, docker,
-                       impersonation, openshift-integration, scripts, token-exchange, web-authn,
-                       client-policies, ciba, map-storage, par, declarative-user-profile,
-                       dynamic-scopes, client-secret-rotation, step-up-authentication,
-                       recovery-codes, update-email, js-adapter, preview.
+                     Disables a set of one or more features. Possible values are: account-api,
+                       account2, account3, admin-api, admin-fine-grained-authz, admin2,
+                       authorization, ciba, client-policies, client-secret-rotation,
+                       declarative-user-profile, device-flow, docker, dpop, dynamic-scopes, fips,
+                       impersonation, js-adapter, kerberos, linkedin-oauth, map-storage, par,
+                       preview, recovery-codes, scripts, step-up-authentication, token-exchange,
+                       transient-users, update-email, web-authn.
 
 Hostname:
 
@@ -111,9 +116,13 @@ HTTP/TLS:
 --http-enabled <true|false>
                      Enables the HTTP listener. Default: false.
 --http-host <host>   The used HTTP Host. Default: 0.0.0.0.
+--http-max-queued-requests <requests>
+                     Maximum number of queued HTTP requests. Use this to shed load in an overload
+                       situation. Excess requests will return a "503 Server not Available" response.
 --http-port <port>   The used HTTP port. Default: 8080.
 --http-relative-path <path>
-                     Set the path relative to '/' for serving resources. Default: /.
+                     Set the path relative to '/' for serving resources. The path must start with a
+                       '/'. Default: /.
 --https-certificate-file <file>
                      The file path to a server certificate or certificate chain in PEM format.
 --https-certificate-key-file <file>
@@ -130,10 +139,11 @@ HTTP/TLS:
                      The password of the key store file. Default: password.
 --https-key-store-type <type>
                      The type of the key store file. If not given, the type is automatically
-                       detected based on the file name.
+                       detected based on the file name. If 'fips-mode' is set to 'strict' and no
+                       value is set, it defaults to 'BCFKS'.
 --https-port <port>  The used HTTPS port. Default: 8443.
 --https-protocols <protocols>
-                     The list of protocols to explicitly enable. Default: TLSv1.3.
+                     The list of protocols to explicitly enable. Default: TLSv1.3,TLSv1.2.
 --https-trust-store-file <file>
                      The trust store which holds the certificate information of the certificates to
                        trust.
@@ -141,7 +151,8 @@ HTTP/TLS:
                      The password of the trust store file.
 --https-trust-store-type <type>
                      The type of the trust store file. If not given, the type is automatically
-                       detected based on the file name.
+                       detected based on the file name. If 'fips-mode' is set to 'strict' and no
+                       value is set, it defaults to 'BCFKS'.
 
 Health:
 
@@ -163,7 +174,7 @@ Proxy:
 
 Vault:
 
---vault <provider>   Enables a vault provider. Possible values are: file, hashicorp.
+--vault <provider>   Enables a vault provider. Possible values are: file.
 --vault-dir <dir>    If set, secrets can be obtained by reading the content of files within the
                        given directory.
 
@@ -216,6 +227,15 @@ Logging:
                      The log level of the root category or a comma-separated list of individual
                        categories and their levels. For the root category, you don't need to
                        specify a category. Default: info.
+
+Security:
+
+--fips-mode <mode>   Sets the FIPS mode. If 'non-strict' is set, FIPS is enabled but on
+                       non-approved mode. For full FIPS compliance, set 'strict' to run on approved
+                       mode. This option defaults to 'disabled' when 'fips' feature is disabled,
+                       which is by default. This option defaults to 'non-strict' when 'fips'
+                       feature is enabled. Possible values are: non-strict, strict. Default:
+                       disabled.
 
 Do NOT start the server using this command when deploying to production.
 

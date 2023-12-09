@@ -18,10 +18,11 @@ Options:
 
 Cache:
 
---cache <type>       Defines the cache mechanism for high-availability. By default, a 'ispn' cache
-                       is used to create a cluster between multiple server nodes. A 'local' cache
-                       disables clustering and is intended for development and testing purposes.
-                       Possible values are: ispn, local. Default: ispn.
+--cache <type>       Defines the cache mechanism for high-availability. By default in production
+                       mode, a 'ispn' cache is used to create a cluster between multiple server
+                       nodes. By default in development mode, a 'local' cache disables clustering
+                       and is intended for development and testing purposes. Possible values are:
+                       ispn, local. Default: ispn.
 --cache-config-file <file>
                      Defines the file from which cache configuration should be loaded from. The
                        configuration file is relative to the 'conf/' directory.
@@ -43,24 +44,27 @@ Transaction:
 
 Feature:
 
---features <feature> Enables a set of one or more features. Possible values are: authorization,
-                       account2, account-api, admin-fine-grained-authz, admin2, docker,
-                       impersonation, openshift-integration, scripts, token-exchange, web-authn,
-                       client-policies, ciba, map-storage, par, declarative-user-profile,
-                       dynamic-scopes, client-secret-rotation, step-up-authentication,
-                       recovery-codes, update-email, js-adapter, preview.
+--features <feature> Enables a set of one or more features. Possible values are: account-api,
+                       account2, account3, admin-api, admin-fine-grained-authz, admin2,
+                       authorization, ciba, client-policies, client-secret-rotation,
+                       declarative-user-profile, device-flow, docker, dpop, dynamic-scopes, fips,
+                       impersonation, js-adapter, kerberos, linkedin-oauth, map-storage, par,
+                       preview, recovery-codes, scripts, step-up-authentication, token-exchange,
+                       transient-users, update-email, web-authn.
 --features-disabled <feature>
-                     Disables a set of one or more features. Possible values are: authorization,
-                       account2, account-api, admin-fine-grained-authz, admin2, docker,
-                       impersonation, openshift-integration, scripts, token-exchange, web-authn,
-                       client-policies, ciba, map-storage, par, declarative-user-profile,
-                       dynamic-scopes, client-secret-rotation, step-up-authentication,
-                       recovery-codes, update-email, js-adapter, preview.
+                     Disables a set of one or more features. Possible values are: account-api,
+                       account2, account3, admin-api, admin-fine-grained-authz, admin2,
+                       authorization, ciba, client-policies, client-secret-rotation,
+                       declarative-user-profile, device-flow, docker, dpop, dynamic-scopes, fips,
+                       impersonation, js-adapter, kerberos, linkedin-oauth, map-storage, par,
+                       preview, recovery-codes, scripts, step-up-authentication, token-exchange,
+                       transient-users, update-email, web-authn.
 
 HTTP/TLS:
 
 --http-relative-path <path>
-                     Set the path relative to '/' for serving resources. Default: /.
+                     Set the path relative to '/' for serving resources. The path must start with a
+                       '/'. Default: /.
 
 Health:
 
@@ -77,7 +81,16 @@ Metrics:
 
 Vault:
 
---vault <provider>   Enables a vault provider. Possible values are: file, hashicorp.
+--vault <provider>   Enables a vault provider. Possible values are: file.
+
+Security:
+
+--fips-mode <mode>   Sets the FIPS mode. If 'non-strict' is set, FIPS is enabled but on
+                       non-approved mode. For full FIPS compliance, set 'strict' to run on approved
+                       mode. This option defaults to 'disabled' when 'fips' feature is disabled,
+                       which is by default. This option defaults to 'non-strict' when 'fips'
+                       feature is enabled. Possible values are: non-strict, strict. Default:
+                       disabled.
 
 Examples:
 

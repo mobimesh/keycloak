@@ -1,14 +1,17 @@
 package org.keycloak.url;
 
+import static org.keycloak.common.util.UriUtils.checkUrl;
+import static org.keycloak.utils.StringUtil.isNotBlank;
+
 import org.jboss.logging.Logger;
+import org.keycloak.common.enums.SslRequired;
 import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.RealmModel;
 import org.keycloak.urls.HostnameProvider;
 import org.keycloak.urls.UrlType;
 
-import javax.ws.rs.core.UriInfo;
+import jakarta.ws.rs.core.UriInfo;
 import java.net.URI;
-import java.net.URISyntaxException;
 
 public class DefaultHostnameProvider implements HostnameProvider {
 
@@ -23,6 +26,8 @@ public class DefaultHostnameProvider implements HostnameProvider {
     private URI realmUri;
 
     private URI adminUri;
+
+    private URI localAdminUri = URI.create("http://localhost:8080/auth");
 
     private final boolean forceBackendUrlToFrontendUrl;
 
@@ -54,6 +59,10 @@ public class DefaultHostnameProvider implements HostnameProvider {
     }
 
     private URI resolveUri(UriInfo originalUriInfo, UrlType type) {
+        if (type.equals(UrlType.LOCAL_ADMIN)) {
+            return localAdminUri;
+        }
+
         URI realmUri = getRealmUri();
         URI frontendUri = realmUri != null ? realmUri : this.frontendUri;
 
@@ -97,11 +106,12 @@ public class DefaultHostnameProvider implements HostnameProvider {
             realmUri = null;
 
             String realmFrontendUrl = session.getContext().getRealm().getAttribute("frontendUrl");
-            if (realmFrontendUrl != null && !realmFrontendUrl.isEmpty()) {
+            if (isNotBlank(realmFrontendUrl)) {
                 try {
-                    realmUri = new URI(realmFrontendUrl);
-                } catch (URISyntaxException e) {
-                    LOGGER.error("Failed to parse realm frontendUrl. Falling back to global value.", e);
+                    checkUrl(SslRequired.NONE, realmFrontendUrl, "frontendUrl");
+                    realmUri = URI.create(realmFrontendUrl);
+                } catch (IllegalArgumentException e) {
+                    LOGGER.errorf(e, "Failed to parse realm frontendUrl '%s'. Falling back to global value.", realmFrontendUrl);
                 }
             }
 
